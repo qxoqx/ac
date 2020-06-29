@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.10)
+project(ac)
+include_directories(./include)
+link_directories(${CMAKE_CURRENT_LIST_DIR}/lib)
+link_libraries(hcnetsdk hpr)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -pthread")
+add_definitions(-DMG_ENABLE_DNS_SERVER -DMG_ENABLE_THREADS -DMG_ENABLE_HTTP_STREAMING_MULTIPART)
+aux_source_directory(${CMAKE_CURRENT_LIST_DIR}/src src)
+set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+add_executable(ac ${src})
