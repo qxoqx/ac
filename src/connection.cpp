@@ -107,7 +107,7 @@ std::vector<card> connection::doGetCards() const {
     NET_DVR_CARD_COND cond = {0};
     cond.dwCardNum = 0xffffffff;
     cond.dwSize = sizeof(NET_DVR_CARD_COND);
-    LONG ret = NET_DVR_StartRemoteConfig(lUserID, NET_DVR_GET_CARD, &cond, cond.dwSize, nullptr, nullptr);
+    LONG ret = NET_DVR_StartRemoteConfig(this->lUserID, NET_DVR_GET_CARD, &cond, cond.dwSize, nullptr, nullptr);
     if (ret < 0) {
         spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
         return std::vector<card>{};
@@ -167,9 +167,10 @@ std::vector<card> connection::doGetCards() const {
             return std::vector<card>{};
         }
     }
-
-
-
+    ret = NET_DVR_StopRemoteConfig(remoteRet);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_StopRemoteConfig error: {}", NET_DVR_GetLastError());
+    }
     return cardList;
 }
 
@@ -238,45 +239,13 @@ bool connection::doSetFace(const std::string &cardNo,const std::string &facePath
     int length = is.tellg();
     is.seekg(0, is.beg);
     // 3. 创建内存缓存区
-    char * buffer = new char[length];
+    char *buffer = new char[length];
     // 4. 读取图片
     is.read(buffer, length);
-
-    NET_DVR_FACE_COND faceCond = {0};
-    faceCond.dwFaceNum = 1;
-    faceCond.dwEnableReaderNo = 1;
-    memcpy(faceCond.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
-    faceCond.dwSize = sizeof(NET_DVR_FACE_COND);
-
-    LONG ret = NET_DVR_StartRemoteConfig(lUserID, NET_DVR_SET_FACE, &faceCond, sizeof(NET_DVR_FACE_COND), nullptr, nullptr);
-    if (ret < 0) {
-        spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
-        return false;
-    }
-
-    NET_DVR_FACE_RECORD faceRecord = {0};
-    memcpy(faceRecord.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
-    faceRecord.dwFaceLen = length;
-    faceRecord.pFaceBuffer = (BYTE*)buffer;
-//    memcpy(faceRecord.pFaceBuffer, buffer, length);
-    faceRecord.dwSize = sizeof(NET_DVR_FACE_RECORD);
-
-    NET_DVR_FACE_STATUS result = {0};
-    DWORD resultLen;
-    LONG new_ret = NET_DVR_SendWithRecvRemoteConfig(ret, &faceRecord, sizeof(NET_DVR_FACE_RECORD), &result, sizeof(NET_DVR_FACE_STATUS), &resultLen);
-    if (new_ret < 0) {
-        spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
-        return false;
-    }
-    spdlog::debug("NET_DVR_SendWithRecvRemoteConfig return: {}", new_ret);
-
-    ret = NET_DVR_StopRemoteConfig(ret);
-    if (ret == 0) {
-        spdlog::error("NET_DVR_StopRemoteConfig error: {}", NET_DVR_GetLastError());
-        return false;
-    }
-
-    return true;
+    is.close();
+    auto result = this->doSetFace(cardNo, buffer, length);
+    free(buffer);
+    return result;
 }
 
 bool connection::doRemoveFaces(const std::string &cardNo) {
@@ -424,6 +393,97 @@ int connection::doCapture(char *dst, int length) const {
         return false;
     }
     return picLength;
+}
+
+std::shared_ptr<card> connection::doGetCard(const std::string &cardNo) {
+    NET_DVR_CARD_COND cond = {0};
+    cond.dwCardNum = 1;
+    cond.dwSize = sizeof(NET_DVR_CARD_COND);
+    LONG ret = NET_DVR_StartRemoteConfig(this->lUserID, NET_DVR_GET_CARD, &cond, sizeof(NET_DVR_CARD_COND), nullptr, nullptr);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
+        return nullptr;
+    }
+    auto remoteRet = ret;
+    NET_DVR_CARD_SEND_DATA data = {0};
+    memcpy(data.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
+    data.dwSize = sizeof(NET_DVR_CARD_SEND_DATA);
+    NET_DVR_CARD_RECORD record = NET_DVR_CARD_RECORD{0};
+    record.dwSize = sizeof(NET_DVR_CARD_RECORD);
+    DWORD outDataLen = 0;
+    ret = NET_DVR_SendWithRecvRemoteConfig(ret, &data, sizeof(NET_DVR_CARD_SEND_DATA), &record, sizeof(NET_DVR_CARD_RECORD), &outDataLen);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
+        return nullptr;
+    }
+
+    ret = NET_DVR_StopRemoteConfig(remoteRet);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_StopRemoteConfig error: {}", NET_DVR_GetLastError());
+    }
+    auto newCard = std::make_shared<card>();
+    newCard->setCardNo(std::string((char*)&record.byCardNo));
+    newCard->setCardType(record.byCardType);
+
+    std::tm begin{}, end{};
+    begin.tm_year = record.struValid.struBeginTime.wYear - 1900;
+    begin.tm_mon = record.struValid.struBeginTime.byMonth - 1;
+    begin.tm_mday = record.struValid.struBeginTime.byDay;
+    begin.tm_hour = record.struValid.struBeginTime.byHour;
+    begin.tm_min = record.struValid.struBeginTime.byMinute;
+    begin.tm_sec = record.struValid.struBeginTime.bySecond;
+
+    end.tm_year = record.struValid.struEndTime.wYear - 1900;
+    end.tm_mon = record.struValid.struEndTime.byMonth - 1;
+    end.tm_mday = record.struValid.struEndTime.byDay;
+    end.tm_hour = record.struValid.struEndTime.byHour;
+    end.tm_min = record.struValid.struEndTime.byMinute;
+    end.tm_sec = record.struValid.struEndTime.bySecond;
+
+    newCard->setBeginTime(begin);
+    newCard->setEndTime(end);
+    newCard->setName(std::string((char*)&record.byName));
+    newCard->setEmployeeId(record.dwEmployeeNo);
+
+    return newCard;
+}
+
+bool connection::doSetFace(const std::string &cardNo, char *buffer, int length) {
+    NET_DVR_FACE_COND faceCond = {0};
+    faceCond.dwFaceNum = 1;
+    faceCond.dwEnableReaderNo = 1;
+    memcpy(faceCond.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
+    faceCond.dwSize = sizeof(NET_DVR_FACE_COND);
+
+    LONG ret = NET_DVR_StartRemoteConfig(lUserID, NET_DVR_SET_FACE, &faceCond, sizeof(NET_DVR_FACE_COND), nullptr, nullptr);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
+        return false;
+    }
+
+    NET_DVR_FACE_RECORD faceRecord = {0};
+    memcpy(faceRecord.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
+    faceRecord.dwFaceLen = length;
+    memcpy(faceRecord.pFaceBuffer, buffer, length);
+//    faceRecord.pFaceBuffer = (BYTE*)buffer;
+    faceRecord.dwSize = sizeof(NET_DVR_FACE_RECORD);
+
+    NET_DVR_FACE_STATUS result = {0};
+    DWORD resultLen;
+    LONG new_ret = NET_DVR_SendWithRecvRemoteConfig(ret, &faceRecord, sizeof(NET_DVR_FACE_RECORD), &result, sizeof(NET_DVR_FACE_STATUS), &resultLen);
+    if (new_ret < 0) {
+        spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
+        return false;
+    }
+    spdlog::debug("NET_DVR_SendWithRecvRemoteConfig return: {}", new_ret);
+
+    ret = NET_DVR_StopRemoteConfig(ret);
+    if (ret == 0) {
+        spdlog::error("NET_DVR_StopRemoteConfig error: {}", NET_DVR_GetLastError());
+        return false;
+    }
+
+    return true;
 }
 
 

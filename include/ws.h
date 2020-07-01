@@ -1,27 +1,52 @@
 #include <mongoose.h>
 #include <string>
 #include <mutex>
-
+#include <map>
+#include <vector>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 
 #ifndef AC_WS_H
 #define AC_WS_H
-#endif //AC_WS_H
+
+#define IDENTITY_SUCCESS 200
+#define IDENTITY_NOT_FOUND 400
+#define IDENTITY_WRONG_STATION 403
+#define IDENTITY_NOT_TIME 404
+
+#define OTHER_GARBAGE 0
+#define WET_GARBAGE 1
 
 class wsConn {
 public:
-    static wsConn* get_instance()
-    {
-        static wsConn instance;
-        return &instance;
+    static wsConn* getInstance(const std::string &name) {
+        static std::map<std::string, wsConn*> instanceList;
+        auto search = instanceList.find(name);
+        if (search != instanceList.end()) {
+            return search->second;
+        } else {
+            auto newWSconn = new wsConn(name);
+            instanceList.emplace(std::make_pair(name, newWSconn));
+            return newWSconn;
+        }
     }
 
-    static int connected;
-    static int done;
-
-    void connect(const std::string &url);
+    int connected = 0;
+    int done = 0;
     bool isConnected();
 
+    // as client
+    void connect(const std::string &url);
     bool send(const std::string&);
+
+    //as server
+    bool bindAndServe(const char *port, MG_CB(mg_event_handler_t handler,
+                                              void *user_data));
+    void emplace_back_connection(mg_connection* nc);
+    bool erase_connection(mg_connection* c);
+    void sendToAll(const char *msg);
+
+    //as server end
     void close();
 
     static void ev_handler(struct mg_connection *nc, int ev, void *ev_data);
@@ -29,25 +54,52 @@ public:
     mg_mgr* GetMgr();
 
 private:
+    std::string instanceName;
     wsConn(){};
+    wsConn(const std::string &name){this->instanceName = name;};
 
-    static wsConn *p_instance;  //用类的指针指向唯一的实例
-
-    class GC
-    {
+    class GC {
     public:
-        ~GC()
-        {
-            if (p_instance != NULL)
-            {
-                delete p_instance;
-                p_instance = NULL;
-            }
-        }
+        ~GC(){}
     };
     static GC gc;
 
+    class Citizen {
+        bool exist{false};
+        std::string name{""};
+        std::string cardNo{""};
+        int point{0};
+        int timestamp{0};
+        std::mutex mtx;
+
+    public:
+        bool isExist() const;
+        void setExist(bool exist);
+        const std::string &getName() const;
+        void setName(const std::string &name);
+        const std::string &getCardNo() const;
+        void setCardNo(const std::string &cardNo);
+        int getPoint() const;
+        void setPoint(int point);
+        int getTimestamp() const;
+        void setTimestamp(int timestamp);
+        void setTimestampNow();
+        const std::mutex &getMtx() const;
+
+        json formJSON();
+    };
+
+
+    std::vector<mg_connection*> clientList;
+
     mg_connection* nc = nullptr;
     mg_mgr *mgr = nullptr;
+public:
+    static Citizen* getCitizen() {
+        static Citizen citizen;
+        return &citizen;
+    }
 
 };
+
+#endif //AC_WS_H

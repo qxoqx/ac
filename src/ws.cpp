@@ -1,19 +1,21 @@
 #include <ws.h>
 #include <iostream>
 #include <spdlog/spdlog.h>
-
-int wsConn::connected = 0;
-int wsConn::done = 0;
-
+#include <env.h>
+#include <util.h>
+#include <connection.h>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 
 void* process_proc(void* p_server)
 {
     auto conn = (wsConn*)p_server;
 
-    while(!wsConn::done)
+    while(!conn->done)
     {
         mg_mgr_poll(conn->GetMgr(), 100);
     }
+    spdlog::debug("client thread exit");
     return NULL;
 }
 
@@ -48,9 +50,7 @@ bool wsConn::isConnected() {
 
 void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
     (void) nc;
-
-//    std::cout << "handle" << std::endl;
-
+    auto c = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
     switch (ev) {
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
@@ -63,11 +63,11 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
             auto *hm = (struct http_message *) ev_data;
             if (hm->resp_code == 101) {
                 spdlog::info("ws connected");
-                wsConn::connected = 1;
+                c->connected = 1;
 
-                char msg[1024];
-                strcpy(msg, "connected");
-                mg_send_websocket_frame(nc, WEBSOCKET_OP_TEXT, msg, strlen(msg));
+//                char msg[1024];
+//                strcpy(msg, "connected");
+//                mg_send_websocket_frame(nc, WEBSOCKET_OP_TEXT, msg, strlen(msg));
 
             } else {
                 spdlog::error("ws connected failed, http code: {}", hm->resp_code);
@@ -95,13 +95,222 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
         }
         case MG_EV_WEBSOCKET_FRAME: {
             struct websocket_message *wm = (struct websocket_message *) ev_data;
-            spdlog::info("{}", wm->data);
+            std::string msg((const char*)wm->data, wm->size);
+            spdlog::info("{}", msg);
+
+
+            try {
+                auto down = json::parse(msg);
+                auto topic = down["topic"];
+                if (topic == nullptr) {
+                    break;
+                }
+                auto topicString = topic.get<std::string>();
+                spdlog::debug("topic: {}", topicString);
+                auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER);
+                if (topicString == "face") {
+                    auto data = down["data"];
+                    if (data == nullptr) {
+                        break;
+                    }
+                    auto dataDOM = json::parse(data.get<std::string>());
+
+                    auto picture = dataDOM["pictureInfo"];
+                    auto userName = dataDOM["userName"];
+                    auto cardNo = dataDOM["identityNo"];
+                    if (picture == nullptr || userName == nullptr || cardNo == nullptr) {
+                        spdlog::error("loss of field");
+                        break;
+                    }
+
+                    auto acSrc = std::string(getAccessAddr());
+                    auto acUsername = std::string(getAccessUsername());
+                    auto acPassword = std::string(getAccessPassword());
+                    connection hik_c(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
+
+                    spdlog::debug("hik sdk {} connected", hik_c.isLogin() ? "is" : "NOT");
+                    if(!hik_c.isLogin()) {
+                        spdlog::error("access connect failed");
+                        break;
+                    }
+                    auto thecard = hik_c.doGetCard(cardNo.get<std::string>());
+                    if (thecard == nullptr) {
+                        // 不存在, 先下发此cardNo
+                        auto newcard = std::make_shared<card>();
+                        newcard->setCardNo(cardNo.get<std::string>());
+                        newcard->setCardType(1);
+                        newcard->setName(userName.get<std::string>());
+                        newcard->setEmployeeId(std::stol(cardNo.get<std::string>()));
+                        time_t timep;
+                        time(&timep); /*获得time_t结构的时间，UTC时间*/
+                        auto p = gmtime(&timep);
+                        auto newe = *p;
+                        newe.tm_year+=100;
+                        newcard->setBeginTime(*p);
+                        newcard->setEndTime(newe);
+                        if (!hik_c.doSetCard(*newcard)) {
+                            spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError);
+                            break;
+                        }
+
+                    }
+                    // 再下发人脸
+                    auto base64 = picture.get<std::string>();
+                    char face[204800];
+                    auto picLength = mg_base64_decode((const unsigned char*)base64.c_str(), base64.length(), face);
+                    hik_c.doSetFace(thecard->getCardNo(), face, picLength);
+                } else if (topicString == "ic") {
+                    // do nothing now
+                } else if (topicString == "userIdentity") {
+                    auto code = down["code"];
+                    auto msg = down["msg"];
+                    if (code == nullptr || msg == nullptr) {
+                        spdlog::error("userIdentity response less code/msg");
+                        break;
+                    }
+
+                    auto codeInt = code.get<int>();
+
+                    switch (codeInt) {
+                        case IDENTITY_SUCCESS: {
+                            auto msgDOM = json::parse(msg.get<std::string>());
+                            auto userName = msgDOM["userName"];
+                            auto point = msgDOM["point"];
+                            auto cardNo = msgDOM["cardNo"];
+                            if (userName == nullptr || point == nullptr || cardNo == nullptr) {
+                                spdlog::error("msg response less userName/point");
+                                break;
+                            }
+                            json userObj;
+                            auto cardNoStr = cardNo.get<std::string>();
+                            userObj["id"] = cardNoStr;
+                            userObj["username"] = userName.get<std::string>();
+                            userObj["pointTotal"] = point.get<int>();
+                            json notifyObj;
+                            notifyObj["user"] = userObj;
+                            notifyObj["operationType"] = "login";
+
+                            auto citizen = wsConn::getCitizen();
+                            citizen->setCardNo(cardNo.get<std::string>());
+                            citizen->setName(userName.get<std::string>());
+                            citizen->setExist(true);
+                            citizen->setPoint(point.get<int>());
+                            citizen->setTimestampNow();
+
+                            std::thread p([](Citizen* citizenPtr, std::string cardNo){
+                                // tell machine that the person starts to drop
+
+
+                                std::this_thread::sleep_for(std::chrono::seconds (35));
+                                const auto nowTime = std::chrono::system_clock::now();
+                                auto nowTimeUnix = std::chrono::duration_cast<std::chrono::seconds>(
+                                        nowTime.time_since_epoch()).count();
+
+                                if(citizenPtr != nullptr && citizenPtr->getCardNo() == cardNo && citizenPtr->isExist() && nowTimeUnix - citizenPtr->getTimestamp() > 30) {
+                                    spdlog::info("{} timeout", cardNo);
+                                    citizenPtr->setExist(false);
+                                    auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER);
+                                    json userObj;
+                                    userObj["id"] = cardNo;
+                                    userObj["username"] = citizenPtr->getName();
+                                    userObj["pointTotal"] = citizenPtr->getPoint();
+                                    json msgObj;
+                                    msgObj["operationType"] = "logout";
+                                    msgObj["user"] = userObj;
+                                    auto msgStr = msgObj.dump();
+                                    wsServer->sendToAll(msgStr.c_str());
+                                    return;
+                                }
+                                spdlog::info("time updated or other covered");
+
+                            }, citizen, cardNo.get<std::string>());
+                            p.detach();
+
+
+                            auto msgStr = notifyObj.dump();
+                            wssconn->sendToAll(msgStr.c_str());
+
+                            break;
+                        }
+                        case IDENTITY_NOT_FOUND:
+                        case IDENTITY_WRONG_STATION: {
+                            json notifyObj;
+                            notifyObj["operationType"] = "logerror";
+                            auto msgStr = notifyObj.dump();
+                            wssconn->sendToAll(msgStr.c_str());
+                            break;
+                        }
+                        case IDENTITY_NOT_TIME: {
+                            json notifyObj;
+                            notifyObj["operationType"] = "outdate";
+                            auto msgStr = notifyObj.dump();
+                            wssconn->sendToAll(msgStr.c_str());
+                            break;
+                        }
+                        default: {
+                            break;
+                        }
+                    }
+
+                } else if (topicString == "garbageInfo"){
+                    auto msg = down["msg"];
+                    if (msg == nullptr) {
+                        spdlog::error("userIdentity response less msg");
+                        break;
+                    }
+                    auto msgDOM = json::parse(msg.get<std::string>());
+                    auto isPass = msgDOM["passed"];
+                    auto pointTotal = msgDOM["pointTotal"];
+                    auto thePoints = msgDOM["thePoints"];
+                    auto weight = msgDOM["weight"];
+                    if (pointTotal == nullptr || thePoints == nullptr) {
+                        spdlog::error("userIdentity response less pointTotal/thePoints");
+                        break;
+                    }
+                    auto citizen = wsConn::getCitizen();
+                    if (citizen->isExist() == false) {
+                        break;
+                    }
+                    if (thePoints.get<int>() > 0) {
+                        citizen->setPoint(citizen->getPoint() + thePoints.get<int>());
+                    }
+                    citizen->setTimestampNow();
+                    json rubbishObj;
+
+
+                    if (isPass == nullptr) {
+                        rubbishObj["type"] = OTHER_GARBAGE;
+                    } else if (isPass.get<bool>()){
+                        rubbishObj["type"] = WET_GARBAGE;
+                    } else {
+                        rubbishObj["type"] = OTHER_GARBAGE;
+                    }
+                    rubbishObj["weight"] = weight.get<int>();
+                    rubbishObj["point"] = thePoints.get<int>();
+
+
+                    json notifyObj;
+                    notifyObj["user"] = citizen->formJSON();
+                    notifyObj["rubbish"] = rubbishObj;
+                    notifyObj["operationType"] = "drop";
+
+                    auto msgStr = notifyObj.dump();
+                    wssconn->sendToAll(msgStr.c_str());
+                } else {
+                    spdlog::warn("wrong topic");
+                }
+            } catch (json::exception &exception) {
+                spdlog::error("catch json exception: {}", exception.what());
+            }
+
+
             break;
         }
         case MG_EV_CLOSE: {
-            if (wsConn::connected)
+            if (c->isConnected())
                 spdlog::info("ws disconnected");
-            wsConn::connected = false;
+            c->connected = false;
+            c->done = 1;
             break;
         }
     }
@@ -112,6 +321,7 @@ bool wsConn::send(const std::string &wsMessage) {
         std::cout << "not connected" << std::endl;
         return false;
     }
+    spdlog::debug("send to java: {}", wsMessage);
     char msg[204800];
     strcpy(msg, wsMessage.c_str());
     mg_send_websocket_frame(this->nc, WEBSOCKET_OP_TEXT, msg, strlen(msg));
@@ -125,4 +335,103 @@ mg_mgr *wsConn::GetMgr() {
 void wsConn::close() {
     wsConn::done = true;
     mg_mgr_free(this->mgr);
+}
+
+bool wsConn::bindAndServe(const char *port, MG_CB(mg_event_handler_t handler,
+                                                  void *user_data)) {
+
+    this->mgr = new(mg_mgr);
+    mg_mgr_init(this->mgr, NULL);
+
+    this->nc = mg_bind(this->mgr , port, handler);
+    mg_set_protocol_http_websocket(this->nc);
+    mg_start_thread(process_proc, this);
+
+    return true;
+}
+
+void wsConn::emplace_back_connection(mg_connection *nc) {
+    this->clientList.emplace_back(nc);
+}
+
+bool wsConn::erase_connection(mg_connection *c) {
+    auto search = this->clientList.end();
+    for(auto it = this->clientList.begin(); it < this->clientList.end(); it++) {
+        if (*it == c) {
+            search = it;
+        }
+    }
+    if(search != this->clientList.end()) {
+        spdlog::debug("ws connection found, delete");
+        this->clientList.erase(search);
+        return true;
+    }
+
+    spdlog::error("ws connection not found");
+    return false;
+}
+
+void wsConn::sendToAll(const char *msg) {
+    spdlog::debug("send to frontend: {}", msg);
+    for(auto &c : this->clientList) {
+        mg_send_websocket_frame(c, WEBSOCKET_OP_TEXT, msg, strlen(msg));
+    }
+}
+
+bool wsConn::Citizen::isExist() const {
+    return exist;
+}
+
+void wsConn::Citizen::setExist(bool exist) {
+    Citizen::exist = exist;
+}
+
+const std::string &wsConn::Citizen::getName() const {
+    return name;
+}
+
+void wsConn::Citizen::setName(const std::string &name) {
+    Citizen::name = name;
+}
+
+const std::string &wsConn::Citizen::getCardNo() const {
+    return cardNo;
+}
+
+void wsConn::Citizen::setCardNo(const std::string &cardNo) {
+    Citizen::cardNo = cardNo;
+}
+
+int wsConn::Citizen::getPoint() const {
+    return point;
+}
+
+void wsConn::Citizen::setPoint(int point) {
+    Citizen::point = point;
+}
+
+json wsConn::Citizen::formJSON() {
+    json j;
+    j["username"] = this->getName();
+    j["id"] = std::stol(this->getCardNo());
+    j["pointTotal"] = this->getPoint();
+    return json(j);
+}
+
+int wsConn::Citizen::getTimestamp() const {
+    return timestamp;
+}
+
+void wsConn::Citizen::setTimestamp(int timestamp) {
+    Citizen::timestamp = timestamp;
+}
+
+void wsConn::Citizen::setTimestampNow() {
+    const auto nowTime = std::chrono::system_clock::now();
+    Citizen::setTimestamp(std::chrono::duration_cast<std::chrono::seconds>(
+            nowTime.time_since_epoch()).count());
+}
+
+const std::mutex &wsConn::Citizen::getMtx() const {
+    return mtx;
 }

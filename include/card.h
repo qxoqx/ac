@@ -10,14 +10,15 @@
 
 class card {
     std::string cardNo;
-    long employeeID;
+    long employeeID{0};
     std::string name;
     std::string password = "123456";
-    long cardType;
-    std::tm endTime;
-    std::tm beginTime;
+    long cardType{1};
+    std::tm endTime{};
+    std::tm beginTime{};
 
 public:
+    card(){};
     const std::string &getCardNo() const;
     void setCardNo(const std::string &cardNo);
     const std::string &getName() const;

@@ -10,6 +10,7 @@
 
 #include <card.h>
 #include <face.h>
+#include <HCNetSDK.h>
 
 #include <spdlog/spdlog.h>
 
@@ -44,10 +45,12 @@ public:
     bool doCapture(const char* saveDst) const;
     int doCapture(char *dst, int length) const;
 
+    std::shared_ptr<card> doGetCard(const std::string &cardNo);
     std::vector<card> doGetCards() const;
     bool doSetCard(const card &newcard);
     bool doRemoveCard(std::string cardNo);
 
+    bool doSetFace(const std::string &cardNo, char* buffer, int length);
     bool doSetFace(const std::string &cardNo,const std::string &facePath);
     bool doGetFaces(const std::string &cardNo) const;
     bool doRemoveFaces(const std::string &cardNo);
