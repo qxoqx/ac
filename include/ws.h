@@ -4,6 +4,8 @@
 #include <map>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include "util.h"
+
 using json = nlohmann::json;
 
 #ifndef AC_WS_H
@@ -49,7 +51,8 @@ public:
     //as server end
     void close();
 
-    static void ev_handler(struct mg_connection *nc, int ev, void *ev_data);
+    static void backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data);
+    static void machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data);
 
     mg_mgr* GetMgr();
 
@@ -70,9 +73,11 @@ private:
         std::string cardNo{""};
         int point{0};
         int timestamp{0};
-        std::mutex mtx;
+        PERSON_STATUS status{PERSON_EXIT};
 
     public:
+        std::mutex mtx;
+
         bool isExist() const;
         void setExist(bool exist);
         const std::string &getName() const;
@@ -84,7 +89,8 @@ private:
         int getTimestamp() const;
         void setTimestamp(int timestamp);
         void setTimestampNow();
-        const std::mutex &getMtx() const;
+        PERSON_STATUS getStatus() const;
+        void setStatus(PERSON_STATUS status);
 
         json formJSON();
     };

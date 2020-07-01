@@ -58,9 +58,21 @@ int main(int argc, char* argv[]) {
 //            }
     }
 
+    //
     auto wsclient = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
-    wsclient->connect("ws://192.168.99.144:8000/webSocket/100243536");
+    auto backendAddr = std::string(getBackendWSServer());
+    if (*(backendAddr.rbegin()) != '/') {
+        backendAddr.push_back('/');
+    }
+    backendAddr.append(getDeviceNo());
+    spdlog::debug("connecting to backend {}", backendAddr);
+    wsclient->connect(backendAddr);
 
+    //
+    auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+    machineClient->connect(getMachineWSServer());
+
+    //
     auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER);
     wssconn->bindAndServe("8085", server);
 
@@ -70,50 +82,6 @@ int main(int argc, char* argv[]) {
 //    char base64[409600]={0};
 //    mg_base64_encode(buffer.data(), buffer.size(), base64);
 //    spdlog::debug("pic: {}", base64);
-
-    for (auto i = 0;i < 0;i++) {
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-
-        spdlog::debug("someone coming");
-
-        json data;
-        data["cardNo"] = "6012345643";
-        data["deviceNo"] = "100243536";
-        json msg;
-        msg["topic"] = "userIdentity";
-        msg["data"] = data;
-
-        wsclient->send(msg.dump());
-        std::this_thread::sleep_for(std::chrono::seconds (10));
-
-//        auto capSrc = std::string(getCaptureAddr());
-//        auto capUsername = std::string(getCaptureUsername());
-//        auto capPassword = std::string(getCapturePassword());
-//        connection hik_cap(capSrc.c_str(), capUsername.c_str(), capPassword.c_str());
-//        hik_cap.doCapture()
-
-        std::ifstream fin("/home/srt/froggggg.jpeg", std::ios::binary);
-        std::vector<unsigned char> buffer(std::istreambuf_iterator<char>(fin), {});
-        char base64[409600]={0};
-        mg_base64_encode(buffer.data(), buffer.size(), base64);
-        spdlog::debug("pic: {}", base64);
-
-        json garbageData;
-        garbageData["cardNo"] = "6012345643";
-        garbageData["deviceNo"] = "100243536";
-        garbageData["garbageType"] = WET_GARBAGE;
-        garbageData["weight"] = 10.0;
-        garbageData["picture"] = base64;
-        const auto nowTime = std::chrono::system_clock::now();
-        garbageData["msgId"] = std::to_string( std::chrono::duration_cast<std::chrono::seconds>(
-                nowTime.time_since_epoch()).count());
-        json garbageMsg;
-        garbageMsg["topic"] = "garbageInfo";
-        garbageMsg["data"] = garbageData;
-
-        wsclient->send(garbageMsg.dump());
-
-    }
 
     std::this_thread::sleep_for(std::chrono::hours(1));
 
@@ -141,7 +109,7 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
 
                     json data;
                     data["cardNo"] = std::string((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
-                    data["deviceNo"] = "100243536";
+                    data["deviceNo"] = getDeviceNo();
                     json msg;
                     msg["topic"] = "userIdentity";
                     msg["data"] = data;

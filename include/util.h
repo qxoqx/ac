@@ -9,6 +9,14 @@
 #define AS_BACKEND_WS_CLIENT "asBackendClient"
 #define AS_SCREEN_WS_SERVER "asScreenServer"
 
+
+enum PERSON_STATUS {
+    PERSON_EXIT = 1,
+    PERSON_LOGIN = 2,
+    PERSON_DROPPING = 3,
+    PERSON_WAITING = 4,
+};
+
 class util {
 
 };

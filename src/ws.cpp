@@ -24,7 +24,14 @@ void wsConn::connect(const std::string &url) {
     mg_connection* nc;
 
     mg_mgr_init(this->mgr, NULL);
-    nc = mg_connect_ws(this->mgr, wsConn::ev_handler, url.c_str(), nullptr, nullptr);
+    if (this->instanceName == AS_BACKEND_WS_CLIENT) {
+        nc = mg_connect_ws(this->mgr, wsConn::backend_ev_handler, url.c_str(), nullptr, nullptr);
+    } else if (this->instanceName == AS_MACHINE_WS_CLIENT) {
+        nc = mg_connect_ws(this->mgr, wsConn::machine_ev_handler, url.c_str(), nullptr, nullptr);
+    } else {
+        spdlog::error("wrong ws client type");
+        return;
+    }
 
     if (nc == NULL) {
         spdlog::error("Invalid address");
@@ -48,14 +55,14 @@ bool wsConn::isConnected() {
 }
 
 
-void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
+void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
     (void) nc;
     auto c = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
     switch (ev) {
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
             if (status != 0) {
-                spdlog::error("ws connect error: {}", status);
+                spdlog::error("backend ws connect error: {}", status);
             }
             break;
         }
@@ -96,7 +103,7 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
         case MG_EV_WEBSOCKET_FRAME: {
             struct websocket_message *wm = (struct websocket_message *) ev_data;
             std::string msg((const char*)wm->data, wm->size);
-            spdlog::info("{}", msg);
+            spdlog::info("receive from backend {}", msg);
 
 
             try {
@@ -196,17 +203,40 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
                             citizen->setExist(true);
                             citizen->setPoint(point.get<int>());
                             citizen->setTimestampNow();
+                            citizen->setStatus(PERSON_LOGIN);
 
                             std::thread p([](Citizen* citizenPtr, std::string cardNo){
-                                // tell machine that the person starts to drop
+                                if (citizenPtr) {
+//                                    citizenPtr->mtx.lock();
+                                } else {
+                                    return;
+                                }
 
+                                auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
 
-                                std::this_thread::sleep_for(std::chrono::seconds (35));
+                                if (machineClient->isConnected()) {
+                                    // 告诉驱动开始扔垃圾
+                                    json msg;
+                                    msg["topic"] = "startDrop";
+                                    machineClient->send(msg.dump());
+
+                                    // 等居民扔垃圾
+                                    citizenPtr->setStatus(PERSON_DROPPING);
+                                    std::this_thread::sleep_for(std::chrono::seconds (20));
+
+                                    // 告诉驱动扔垃圾完成
+                                    citizenPtr->setStatus(PERSON_WAITING);
+                                    msg["topic"] = "finishDrop";
+                                    machineClient->send(msg.dump());
+
+                                }
+
+                                std::this_thread::sleep_for(std::chrono::seconds (15));
                                 const auto nowTime = std::chrono::system_clock::now();
                                 auto nowTimeUnix = std::chrono::duration_cast<std::chrono::seconds>(
                                         nowTime.time_since_epoch()).count();
 
-                                if(citizenPtr != nullptr && citizenPtr->getCardNo() == cardNo && citizenPtr->isExist() && nowTimeUnix - citizenPtr->getTimestamp() > 30) {
+                                if(citizenPtr->getCardNo() == cardNo && citizenPtr->isExist() && nowTimeUnix - citizenPtr->getTimestamp() > 30) {
                                     spdlog::info("{} timeout", cardNo);
                                     citizenPtr->setExist(false);
                                     auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER);
@@ -220,6 +250,8 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
                                     auto msgStr = msgObj.dump();
                                     wsServer->sendToAll(msgStr.c_str());
                                     return;
+                                } else if (citizenPtr->getCardNo() != cardNo) {
+
                                 }
                                 spdlog::info("time updated or other covered");
 
@@ -268,7 +300,7 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
                         break;
                     }
                     auto citizen = wsConn::getCitizen();
-                    if (citizen->isExist() == false) {
+                    if (!citizen->isExist()) {
                         break;
                     }
                     if (thePoints.get<int>() > 0) {
@@ -280,10 +312,23 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
 
                     if (isPass == nullptr) {
                         rubbishObj["type"] = OTHER_GARBAGE;
-                    } else if (isPass.get<bool>()){
-                        rubbishObj["type"] = WET_GARBAGE;
-                    } else {
-                        rubbishObj["type"] = OTHER_GARBAGE;
+                    }  else {
+                        if (isPass.get<bool>()){
+                            rubbishObj["type"] = WET_GARBAGE;
+                        } else {
+                            rubbishObj["type"] = OTHER_GARBAGE;
+                        }
+
+                        auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+                        if (machineClient->isConnected()) {
+                            json data;
+                            data["isWetGarbage"] = isPass.get<bool>();
+                            json msg;
+                            msg["topic"] = "reportResult";
+                            msg["data"] = data;
+                            machineClient->send(msg.dump());
+                        }
+
                     }
                     rubbishObj["weight"] = weight.get<int>();
                     rubbishObj["point"] = thePoints.get<int>();
@@ -303,6 +348,65 @@ void wsConn::ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
                 spdlog::error("catch json exception: {}", exception.what());
             }
 
+
+            break;
+        }
+        case MG_EV_CLOSE: {
+            if (c->isConnected())
+                spdlog::info("ws disconnected");
+            c->connected = false;
+            c->done = 1;
+            break;
+        }
+    }
+}
+
+void wsConn::machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
+    (void) nc;
+    auto c = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+    switch (ev) {
+        case MG_EV_CONNECT: {
+            int status = *((int *) ev_data);
+            if (status != 0) {
+                spdlog::error("ws connect error: {}", status);
+            }
+            break;
+        }
+        case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
+            auto *hm = (struct http_message *) ev_data;
+            if (hm->resp_code == 101) {
+                spdlog::info("machine ws connected");
+                c->connected = 1;
+            } else {
+                spdlog::error("ws connected failed, http code: {}", hm->resp_code);
+                /* Connection will be closed after this. */
+            }
+            break;
+        }
+        case MG_EV_POLL: {
+            break;
+        }
+        case MG_EV_WEBSOCKET_FRAME: {
+            struct websocket_message *wm = (struct websocket_message *) ev_data;
+            std::string msg((const char*)wm->data, wm->size);
+            spdlog::info("receive from machine {}", msg);
+
+            try {
+                auto down = json::parse(msg);
+                auto topic = down["topic"];
+                if (topic == nullptr) {
+                    spdlog::error("none topic msg");
+                    break;
+                }
+
+
+
+
+
+
+            } catch (std::exception &e) {
+                spdlog::error("catch exception: {}", e.what());
+            }
 
             break;
         }
@@ -432,6 +536,10 @@ void wsConn::Citizen::setTimestampNow() {
             nowTime.time_since_epoch()).count());
 }
 
-const std::mutex &wsConn::Citizen::getMtx() const {
-    return mtx;
+PERSON_STATUS wsConn::Citizen::getStatus() const {
+    return status;
+}
+
+void wsConn::Citizen::setStatus(PERSON_STATUS status) {
+    Citizen::status = status;
 }
