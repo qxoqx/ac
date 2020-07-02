@@ -4,6 +4,8 @@
 #include <map>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include <thread>
+#include <spdlog/spdlog.h>
 #include "util.h"
 
 using json = nlohmann::json;
@@ -25,7 +27,12 @@ public:
         static std::map<std::string, wsConn*> instanceList;
         auto search = instanceList.find(name);
         if (search != instanceList.end()) {
-            return search->second;
+            auto conn = search->second;
+            if (!conn->isConnected()) {
+                spdlog::debug("ws reconnect");
+                conn->connect(conn->url);
+            }
+            return conn;
         } else {
             auto newWSconn = new wsConn(name);
             instanceList.emplace(std::make_pair(name, newWSconn));
@@ -33,7 +40,7 @@ public:
         }
     }
 
-    int connected = 0;
+    int connected = 0;  // 0: unconnected 1: connected 2: connecting
     int done = 0;
     bool isConnected();
 
@@ -58,6 +65,7 @@ public:
 
 private:
     std::string instanceName;
+    std::string url;
     wsConn(){};
     wsConn(const std::string &name){this->instanceName = name;};
 
@@ -68,7 +76,6 @@ private:
     static GC gc;
 
     class Citizen {
-        bool exist{false};
         std::string name{""};
         std::string cardNo{""};
         int point{0};
@@ -78,8 +85,6 @@ private:
     public:
         std::mutex mtx;
 
-        bool isExist() const;
-        void setExist(bool exist);
         const std::string &getName() const;
         void setName(const std::string &name);
         const std::string &getCardNo() const;
@@ -92,6 +97,8 @@ private:
         PERSON_STATUS getStatus() const;
         void setStatus(PERSON_STATUS status);
 
+        void checkLock() ;
+
         json formJSON();
     };
 
@@ -100,10 +107,18 @@ private:
 
     mg_connection* nc = nullptr;
     mg_mgr *mgr = nullptr;
+
+
+
 public:
+    static std::mutex mtx;
     static Citizen* getCitizen() {
+        //mtx.lock();
         static Citizen citizen;
         return &citizen;
+    }
+    static void unlock() {
+       // mtx.unlock();
     }
 
 };

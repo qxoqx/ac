@@ -18,12 +18,11 @@ static std::string envCapturePassword = "ENV_CAPTURE_PASSWORD";
 
 // 后端ws服务端地址
 static std::string envBackendWSServer = "ENV_BACKEND_WS_SERVER";
+// 设备号
+static std::string envDeviceNo = "ENV_DEVICE_NUMBER";
 
 // 工控机ws服务端地址
 static std::string envMachineWSServer = "ENV_MACHINE_WS_SERVER";
-
-// 设备号
-static std::string envDeviceNo = "ENV_DEVICE_NUMBER";
 
 static const char* getAccessAddr()  {
     return std::getenv(envAccessAddr.c_str());
@@ -49,13 +48,21 @@ static const char* getCapturePassword() {
     return std::getenv(envCapturePassword.c_str());
 }
 
-static const char* getBackendWSServer() {
-    return std::getenv(envBackendWSServer.c_str());
-}
-
 static const char* getDeviceNo() {
     return std::getenv(envDeviceNo.c_str());
 }
+
+static const std::string getBackendWSServer() {
+    auto backendAddr = std::string(std::getenv(envBackendWSServer.c_str()));
+    if (*(backendAddr.rbegin()) != '/') {
+        backendAddr.push_back('/');
+    }
+    auto deviceNo = getDeviceNo();
+    backendAddr.append(deviceNo);
+    return backendAddr;
+}
+
+
 
 static const char* getMachineWSServer() {
     return std::getenv(envMachineWSServer.c_str());

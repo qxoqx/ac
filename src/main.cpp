@@ -27,44 +27,14 @@ int main(int argc, char* argv[]) {
 
     spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
     if(hik_ac.isLogin()) {
-//        hik_ac.doCapture("./here.jpg");
-//        auto cards = hik_ac.doGetCards();
-//        for (auto it = cards.begin(); it < cards.end(); it++) {
-//            std::cout << it->String() << std::endl;
-//        }
-//        hik_ac.doGetFaces(std::string("1001"));
-//        c.doSetFace("1001", "./faces/srt1.jpeg");
-//        c.doRemoveFaces(std::string("1001"));
         hik_ac.setAlarm(MessageCallback);
-
-//        time_t timep;
-//        time(&timep); /*获得time_t结构的时间，UTC时间*/
-//        auto p = gmtime(&timep);
-//        spdlog::info("year: {}, mon: {}, mday: {}, hour: {}, min: {}, sec: {}",
-//                    p->tm_year, p->tm_mon, p->tm_mday, p->tm_hour, p->tm_min, p->tm_sec);
-//
-//
-//            auto newcard = new card;
-//            newcard->setCardType(1);
-//            newcard->setCardNo(std::string("0736558942"));
-//            newcard->setName("abc");
-//            newcard->setEmployeeId(90001);
-//            auto newe = *p;
-//            newe.tm_year++;
-//            newcard->setBeginTime(*p);
-//            newcard->setEndTime(newe);
-//            if (!hik_ac.doSetCard(*newcard)) {
-//                spdlog::info("do set card err: ", NET_DVR_GetLastError);
-//            }
+    } else {
+        spdlog::error("hik ac connect error");
     }
 
     //
     auto wsclient = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
-    auto backendAddr = std::string(getBackendWSServer());
-    if (*(backendAddr.rbegin()) != '/') {
-        backendAddr.push_back('/');
-    }
-    backendAddr.append(getDeviceNo());
+    auto backendAddr = getBackendWSServer();
     spdlog::debug("connecting to backend {}", backendAddr);
     wsclient->connect(backendAddr);
 
@@ -75,6 +45,19 @@ int main(int argc, char* argv[]) {
     //
     auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER);
     wssconn->bindAndServe("8085", server);
+
+//    auto capSrc = std::string(getCaptureAddr());
+//    auto capUsername = std::string(getCaptureUsername());
+//    auto capPassword = std::string(getCapturePassword());
+//    connection hik_cap(capSrc.c_str(), capUsername.c_str(), capPassword.c_str());
+//
+//    std::vector<unsigned char> buffer(static_cast<size_t>(512 * 1024));
+//    auto picLength = hik_cap.doCapture(reinterpret_cast<char *>(buffer.data()), buffer.size());
+//    std::vector<unsigned char> base64buffer(static_cast<size_t>(1024 * 1024));
+//
+//    mg_base64_encode(buffer.data(), picLength, reinterpret_cast<char *>(base64buffer.data()));
+//    spdlog::info("base64: {}", base64buffer.data());
+
 
 //    std::ifstream fin("/home/srt/froggggg.jpeg", std::ios::binary);
 //    std::vector<unsigned char> buffer(std::istreambuf_iterator<char>(fin), {});
@@ -94,7 +77,6 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
     //以下代码仅供参考，实际应用中不建议在该回调函数中直接处理数据保存文件
     //例如可以使用消息的方式(PostMessage)在消息响应函数里进行处理
 
-
     switch(lCommand)
     {
         case COMM_ALARM_ACS:
@@ -106,6 +88,25 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                 || struAlarmInfo.dwMinor == MINOR_INVALID_CARD
                 || struAlarmInfo.dwMinor == MINOR_FACE_VERIFY_PASS)) {
                     auto wsconn = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
+                    if (!wsconn->isConnected()) {
+                        auto backendAddr = getBackendWSServer();
+                        wsconn->connect(backendAddr);
+                        if (!wsconn->isConnected()) {
+                            // todo: 后端连不上,告知前端
+
+                            spdlog::error("can't connect to backend");
+                            break;
+                        }
+                    }
+                    std::string accessorCardNo((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
+
+                    auto citizen = wsConn::getCitizen();
+                    if (citizen->getCardNo() != accessorCardNo && citizen->getStatus() != PERSON_EXIT) {
+                        spdlog::info("occupied by {}", citizen->getName());
+                        wsConn::unlock();
+                        break;
+                    }
+                    wsConn::unlock();
 
                     json data;
                     data["cardNo"] = std::string((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
@@ -114,20 +115,6 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                     msg["topic"] = "userIdentity";
                     msg["data"] = data;
                     wsconn->send(msg.dump());
-
-//                    auto capSrc = std::string(getCaptureAddr());
-//                    auto capUsername = std::string(getCaptureUsername());
-//                    auto capPassword = std::string(getCapturePassword());
-//                    connection cap(capSrc.c_str(), capUsername.c_str(), capPassword.c_str());
-//
-//                    char pic[102400];
-//                    char dst[204800];
-//
-//                    int picLength = cap.doCapture(pic, 102400);
-//                    spdlog::debug("raw picture length: {}", picLength);
-//                    mg_base64_encode(reinterpret_cast<const unsigned char *>(pic), picLength, dst);
-//
-//                    wsconn->send(dst);
 
                 }
             break;

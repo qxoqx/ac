@@ -9,6 +9,14 @@
 #define AS_BACKEND_WS_CLIENT "asBackendClient"
 #define AS_SCREEN_WS_SERVER "asScreenServer"
 
+#define MACHINE_START_DROP "StartDrop"
+#define MACHINE_FINISH_DROP "FinishDrop"
+#define MACHINE_PHOTO_RESULT "PhotoResult"
+
+#define MACHINE_REPORT_WEIGHT "ReportWeighResult"
+#define MACHINE_REPORT_END "ReportEndDeal"
+#define MACHINE_REPORT_ERROR "ReportError"
+#define MACHINE_REPORT_SET_MODE "ReportSetMode"
 
 enum PERSON_STATUS {
     PERSON_EXIT = 1,
