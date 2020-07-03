@@ -5,6 +5,8 @@
 #include <util.h>
 #include <connection.h>
 #include <nlohmann/json.hpp>
+
+#include <message.h>
 using json = nlohmann::json;
 
 void* process_proc(void* p_server)
@@ -16,11 +18,15 @@ void* process_proc(void* p_server)
         mg_mgr_poll(conn->GetMgr(), 100);
     }
     conn->connected = 0;
-    spdlog::debug("client thread exit");
+    spdlog::debug("client {} thread exit", conn->getInstanceName());
     return NULL;
 }
 std::mutex wsConn::mtx;
 void wsConn::connect(const std::string &url) {
+    if (this->connected == 2) {
+        spdlog::debug("connecting");
+        return;
+    }
     this->connected = 2;
     this->url = url;
     this->mgr = new(mg_mgr);
@@ -32,7 +38,7 @@ void wsConn::connect(const std::string &url) {
     } else if (this->instanceName == AS_MACHINE_WS_CLIENT) {
         nc = mg_connect_ws(this->mgr, wsConn::machine_ev_handler, url.c_str(), nullptr, nullptr);
     } else {
-        spdlog::error("wrong ws client type");
+        spdlog::error("wrong ws client type {}", this->instanceName);
         this->connected = 0;
         return;
     }
@@ -44,14 +50,15 @@ void wsConn::connect(const std::string &url) {
     }
     this->nc = nc;
 
-    mg_start_thread(process_proc, this);
 
+    this->done = 0;
+    mg_start_thread(process_proc, this);
 
 //    while(!wsConn::done) {
 //        mg_mgr_poll(this->mgr, 100);
 //    }
 
-    spdlog::debug("websocket {} connect done", this->instanceName);
+    spdlog::debug("websocket {} connect done, connected: {}", this->instanceName,  this->connected);
 }
 
 bool wsConn::isConnected() {
@@ -61,7 +68,7 @@ bool wsConn::isConnected() {
 
 void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
     (void) nc;
-    auto c = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
+    auto c = wsConn::getInstance(AS_BACKEND_WS_CLIENT, false);
     switch (ev) {
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
@@ -118,7 +125,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                 }
                 auto topicString = topic.get<std::string>();
                 spdlog::debug("topic: {}", topicString);
-                auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER);
+                auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
                 if (topicString == "face") {
                     auto data = down["data"];
                     if (data == nullptr) {
@@ -167,7 +174,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     }
                     // 再下发人脸
                     auto base64 = picture.get<std::string>();
-                    char face[204800];
+                    char face[1024 * 1024] = {0};
                     auto picLength = mg_base64_decode((const unsigned char*)base64.c_str(), base64.length(), face);
                     hik_c.doSetFace(thecard->getCardNo(), face, picLength);
                 } else if (topicString == "ic") {
@@ -194,6 +201,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                             }
 
                             auto citizen = wsConn::getCitizen();
+                            wsConn::lock();
                             citizen->setCardNo(cardNo.get<std::string>());
                             citizen->setName(userName.get<std::string>());
                             citizen->setPoint(point.get<int>());
@@ -203,12 +211,14 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 
                             std::thread p([](std::string cardNo){
                                 auto citizenPtr = wsConn::getCitizen();
+                                wsConn::lock();
                                 if (citizenPtr->getCardNo() != cardNo || citizenPtr->getStatus() == PERSON_EXIT) {
                                     wsConn::unlock();
                                     return;
                                 }
 
-                                auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+                                auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT, true);
+                                spdlog::debug("machine is connected: {}", machineClient->isConnected());
                                 if (machineClient->isConnected()) {
                                     // 告诉驱动开始扔垃圾
                                     json msg;
@@ -217,11 +227,12 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 
                                     // 等居民扔垃圾
                                     citizenPtr->setStatus(PERSON_DROPPING);
-                                    std::this_thread::sleep_for(std::chrono::seconds (20));
+                                    std::this_thread::sleep_for(std::chrono::seconds (5));
                                     wsConn::unlock();
 
                                     // 告诉驱动扔垃圾完成
                                     citizenPtr = wsConn::getCitizen();
+                                    wsConn::lock();
                                     if (citizenPtr->getCardNo() != cardNo || citizenPtr->getStatus() == PERSON_EXIT) {
                                         wsConn::unlock();
                                         return;
@@ -236,25 +247,32 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                                     spdlog::error("machine connection error");
                                 }
 
-                                std::this_thread::sleep_for(std::chrono::seconds (15));
+                                std::this_thread::sleep_for(std::chrono::seconds (80));
                                 const auto nowTime = std::chrono::system_clock::now();
                                 auto nowTimeUnix = std::chrono::duration_cast<std::chrono::seconds>(
                                         nowTime.time_since_epoch()).count();
+                                spdlog::debug("nowTimeUnix: {}", nowTimeUnix);
 
                                 citizenPtr = wsConn::getCitizen();
+                                spdlog::debug("timestamp: {} citizencard: {} cardNo: {} status: {}",
+                                        citizenPtr->getTimestamp(), citizenPtr->getCardNo(), cardNo, citizenPtr->getStatus());
+                                wsConn::lock();
                                 if (citizenPtr->getCardNo() != cardNo || citizenPtr->getStatus() == PERSON_EXIT) {
                                     wsConn::unlock();
                                     return;
-                                } else if (nowTimeUnix - citizenPtr->getTimestamp() > 30) {
+                                } else if (nowTimeUnix - citizenPtr->getTimestamp() > 75) {
                                     spdlog::info("{} timeout", cardNo);
-                                    auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER);
-                                    json userObj;
-                                    userObj["id"] = cardNo;
-                                    userObj["username"] = citizenPtr->getName();
-                                    userObj["pointTotal"] = citizenPtr->getPoint();
+                                    auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
+
                                     json msgObj;
-                                    msgObj["operationType"] = "logout";
-                                    msgObj["user"] = userObj;
+                                    fe::frontendMsg m;
+                                    m.user.id = cardNo;
+                                    m.user.username = citizenPtr->getName();
+                                    m.user.pointTotal = citizenPtr->getPoint();
+                                    m.operationType = "logout";
+
+                                    fe::to_json(msgObj, m);
+
                                     auto msgStr = msgObj.dump();
                                     wsServer->sendToAll(msgStr.c_str());
                                     wsConn::unlock();
@@ -264,14 +282,13 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                             }, cardNo.get<std::string>());
                             p.detach();
 
-                            json userObj;
-                            auto cardNoStr = cardNo.get<std::string>();
-                            userObj["id"] = cardNoStr;
-                            userObj["username"] = userName.get<std::string>();
-                            userObj["pointTotal"] = point.get<int>();
+                            fe::frontendMsg m;
+                            m.user.id = cardNo.get<std::string>();
+                            m.user.username = userName.get<std::string>();
+                            m.user.pointTotal = point.get<int>();
+                            m.operationType = "login";
                             json notifyObj;
-                            notifyObj["user"] = userObj;
-                            notifyObj["operationType"] = "login";
+                            fe::to_json(notifyObj, m);
 
                             auto msgStr = notifyObj.dump();
                             wssconn->sendToAll(msgStr.c_str());
@@ -280,15 +297,19 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                         }
                         case IDENTITY_NOT_FOUND:
                         case IDENTITY_WRONG_STATION: {
+                            fe::frontendMsg m;
+                            m.operationType = "logerror";
                             json notifyObj;
-                            notifyObj["operationType"] = "logerror";
+                            fe::to_json(notifyObj, m);
                             auto msgStr = notifyObj.dump();
                             wssconn->sendToAll(msgStr.c_str());
                             break;
                         }
                         case IDENTITY_NOT_TIME: {
+                            fe::frontendMsg m;
+                            m.operationType = "outdate";
                             json notifyObj;
-                            notifyObj["operationType"] = "outdate";
+                            fe::to_json(notifyObj, m);
                             auto msgStr = notifyObj.dump();
                             wssconn->sendToAll(msgStr.c_str());
                             break;
@@ -300,7 +321,8 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 
                 } else if (topicString == "garbageInfo"){
                     auto msg = down["msg"];
-                    if (msg == nullptr) {
+                    auto code = down["code"];
+                    if (msg == nullptr || code == nullptr || code.get<int>() != 200) {
                         spdlog::error("userIdentity response less msg");
                         break;
                     }
@@ -308,13 +330,15 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     auto isPass = msgDOM["passed"];
                     auto pointTotal = msgDOM["pointTotal"];
                     auto thePoints = msgDOM["thePoints"];
-                    auto weight = msgDOM["weight"];
+                    auto othersWeight = msgDOM["othersWeight"];
+                    auto perishableWeight = msgDOM["perishableWeight"];
                     auto cardNo = msgDOM["cardNo"];
-                    if (pointTotal == nullptr || thePoints == nullptr || weight == nullptr || cardNo == nullptr) {
+                    if (pointTotal == nullptr || thePoints == nullptr || othersWeight == nullptr || perishableWeight == nullptr || cardNo == nullptr) {
                         spdlog::error("userIdentity response less pointTotal/thePoints");
                         break;
                     }
                     auto citizen = wsConn::getCitizen();
+                    wsConn::lock();
                     if (citizen->getCardNo() != cardNo || citizen->getStatus() == PERSON_EXIT) {
                         spdlog::error("wrong status");
                         wsConn::unlock();
@@ -327,51 +351,56 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 //                    citizen->setTimestampNow();
 
                     auto isDroppingWetGarbage = isPass != nullptr;
-                    json rubbishObj;
+                    fe::frontendMsg m;
                     if (isPass == nullptr) {
                         // 未投递易腐垃圾
-                        rubbishObj["type"] = OTHER_GARBAGE;
+                        fe::rubbishT other;
+                        other.type = OTHER_GARBAGE;
+                        other.point = 0;
+                        other.weight = othersWeight.get<int>();
+                        m.rubbishList.emplace_back(other);
                     }  else {
                         if (isPass.get<bool>()){
-                            rubbishObj["type"] = WET_GARBAGE;
+                            fe::rubbishT wet;
+                            wet.type = WET_GARBAGE;
+                            wet.point = thePoints.get<int>();
+                            wet.weight = perishableWeight.get<int>();
+                            m.rubbishList.emplace_back(wet);
+
+                            fe::rubbishT other;
+                            other.type = OTHER_GARBAGE;
+                            other.point = 0;
+                            other.weight = othersWeight.get<int>();
+                            m.rubbishList.emplace_back(other);
                         } else {
-                            rubbishObj["type"] = OTHER_GARBAGE;
+                            fe::rubbishT other;
+                            other.type = OTHER_GARBAGE;
+                            other.point = 0;
+                            other.weight = othersWeight.get<int>() + perishableWeight.get<int>();
+                            m.rubbishList.emplace_back(other);
                         }
-
-                        auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
-                        if (machineClient->isConnected()) {
-                            json data;
-                            data["isWetGarbage"] = isPass.get<bool>();
-                            json msg;
-                            msg["topic"] = "reportResult";
-                            msg["data"] = data;
-                            machineClient->send(msg.dump());
-                        }
-
                     }
-                    rubbishObj["weight"] = weight.get<int>();
-                    rubbishObj["point"] = thePoints.get<int>();
 
-
-                    json notifyObj;
-                    notifyObj["user"] = citizen->formJSON();
-                    notifyObj["rubbish"] = rubbishObj;
-                    notifyObj["operationType"] = "drop";
+                    m.user.id = citizen->getCardNo();
+                    m.user.username = citizen->getName();
+                    m.user.pointTotal = citizen->getPoint();
+                    m.operationType = "drop";
                     wsConn::unlock();
 
                     {
-                        auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+                        auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT, true);
                         json MachineMsgObj;
                         json PayloadObj;
                         PayloadObj["is_take_photo"] = isDroppingWetGarbage;
-                        PayloadObj["IsPerishableWasteRight"] = isDroppingWetGarbage ? isPass.get<bool>() : false;
+                        PayloadObj["is_perishable_waste_right"] = isDroppingWetGarbage ? isPass.get<bool>() : false;
                         MachineMsgObj["payload"] = PayloadObj;
                         MachineMsgObj["error"] = "";
                         MachineMsgObj["topic"] = MACHINE_PHOTO_RESULT;
 
                         machineClient->send(MachineMsgObj.dump());
                     }
-
+                    json notifyObj;
+                    fe::to_json(notifyObj, m);
                     auto msgStr = notifyObj.dump();
                     wssconn->sendToAll(msgStr.c_str());
                 } else {
@@ -396,7 +425,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 
 void wsConn::machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
     (void) nc;
-    auto c = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
+    auto c = wsConn::getInstance(AS_MACHINE_WS_CLIENT, false);
     switch (ev) {
         case MG_EV_CONNECT: {
             int status = *((int *) ev_data);
@@ -428,6 +457,7 @@ void wsConn::machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                 auto down = json::parse(msg);
                 auto topic = down["topic"];
                 auto payload = down["payload"];
+                auto error = down["error"];
                 if (topic == nullptr) {
                     spdlog::error("none topic msg");
                     break;
@@ -470,9 +500,9 @@ void wsConn::machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                         mg_base64_encode(buffer.data(), picLength, reinterpret_cast<char *>(base64buffer.data()));
 
 
-
                     }
                     auto citizen = wsConn::getCitizen();
+                    wsConn::lock();
 
                     const auto nowTime = std::chrono::system_clock::now();
                     auto nowTimeUnix = std::chrono::duration_cast<std::chrono::seconds>(
@@ -487,42 +517,69 @@ void wsConn::machine_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     garbageInfoDataObj["othersExist"] = hasOtherGarbage;
                     garbageInfoDataObj["othersWeight"] = OtherGarbageWeight;
                     if (hasWetGarbage) {
-                        garbageInfoDataObj["picture"] = std::string(reinterpret_cast<char *>(base64buffer.data()), base64buffer.size());
+                        garbageInfoDataObj["picture"] = std::string(reinterpret_cast<char *>(base64buffer.data()), strlen(reinterpret_cast<char *>(base64buffer.data())));
                     }
                     json msgObj;
                     msgObj["topic"] = "garbageInfo";
                     msgObj["data"] = garbageInfoDataObj;
+//                    spdlog::debug("garbageInfo: {}", msgObj.dump());
 
-                    auto backendClient = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
+                    auto backendClient = wsConn::getInstance(AS_BACKEND_WS_CLIENT, true);
                     backendClient->send(msgObj.dump());
+
+                    wsConn::unlock();
 
                 } else if (topicStr == MACHINE_REPORT_END) {
                     auto citizen = wsConn::getCitizen();
+                    wsConn::lock();
                     if (citizen->getStatus() != PERSON_EXIT) {
                         citizen->setStatus(PERSON_EXIT);
                     }
-                    json user;
-                    user["username"] = citizen->getName();
-                    user["id"] = citizen->getCardNo();
-                    user["pointTotal"] = citizen->getPoint();
+                    fe::frontendMsg m;
+                    m.user.id = citizen->getCardNo();
+                    m.user.username = citizen->getName();
+                    m.user.pointTotal = citizen->getPoint();
+                    m.operationType = "logout";
+
                     wsConn::unlock();
 
-                    auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER);
-
-                    json msg;
-                    msg["user"] = user;
-                    msg["operationType"] = "logout";
-                    auto msgStr = msg.dump();
+                    auto wsServer = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
+                    json msgObj;
+                    fe::to_json(msgObj, m);
+                    auto msgStr = msgObj.dump();
                     wsServer->sendToAll(msgStr.c_str());
 
                 } else if (topicStr == MACHINE_REPORT_ERROR) {
                     //
+                    auto citizen = wsConn::getCitizen();
+                    wsConn::lock();
+                    if (error.is_string()) {
+                        auto errorStr = error.get<std::string>();
+                        if (errorStr.empty()) {
+                            auto runningStateObj = payload["running_state"];
+                            auto equipmentStateObj = payload["equipment_state"];
+                            if (runningStateObj == nullptr || equipmentStateObj == nullptr) {
+                                wsConn::unlock();
+                                spdlog::error("no field in {}", MACHINE_REPORT_ERROR);
+                                break;
+                            }
+
+                            auto runningState = runningStateObj.get<int>();
+                            auto equipmentState = equipmentStateObj.get<unsigned int>();
+                            citizen->setMachineStatus(static_cast<MACHINE_STATUS>(runningState));
+                        } else {
+                            spdlog::error("machine err: {}", errorStr);
+                            citizen->setMachineStatus(MACHINE_ERROR);
+                        }
+
+                    }
+
+                    wsConn::unlock();
                 } else if (topicStr == MACHINE_REPORT_SET_MODE) {
                     // 设备状态
                 } else {
                     spdlog::error("unknown topic from machine");
                 }
-
 
 
 
@@ -548,8 +605,8 @@ bool wsConn::send(const std::string &wsMessage) {
         return false;
     }
     spdlog::debug("send to {}: {}", this->instanceName, wsMessage);
-    char msg[204800];
-    strcpy(msg, wsMessage.c_str());
+    char msg[1024 * 1024] ={0};
+    memcpy(msg, wsMessage.c_str(), wsMessage.size());
     mg_send_websocket_frame(this->nc, WEBSOCKET_OP_TEXT, msg, strlen(msg));
     return true;
 }
@@ -602,6 +659,10 @@ void wsConn::sendToAll(const char *msg) {
     for(auto &c : this->clientList) {
         mg_send_websocket_frame(c, WEBSOCKET_OP_TEXT, msg, strlen(msg));
     }
+}
+
+const std::string &wsConn::getInstanceName() const {
+    return instanceName;
 }
 
 const std::string &wsConn::Citizen::getName() const {
@@ -668,4 +729,12 @@ void wsConn::Citizen::checkLock()  {
 //    if (mtx.try_lock()) {
 //        throw std::runtime_error("using after unlock");
 //    }
+}
+
+MACHINE_STATUS wsConn::Citizen::getMachineStatus() const {
+    return machineStatus;
+}
+
+void wsConn::Citizen::setMachineStatus(MACHINE_STATUS machineStatus) {
+    Citizen::machineStatus = machineStatus;
 }

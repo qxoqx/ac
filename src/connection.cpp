@@ -449,6 +449,7 @@ std::shared_ptr<card> connection::doGetCard(const std::string &cardNo) {
 }
 
 bool connection::doSetFace(const std::string &cardNo, char *buffer, int length) {
+    spdlog::debug("face picture length: {}", length);
     NET_DVR_FACE_COND faceCond = {0};
     faceCond.dwFaceNum = 1;
     faceCond.dwEnableReaderNo = 1;
@@ -464,8 +465,8 @@ bool connection::doSetFace(const std::string &cardNo, char *buffer, int length) 
     NET_DVR_FACE_RECORD faceRecord = {0};
     memcpy(faceRecord.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
     faceRecord.dwFaceLen = length;
-    memcpy(faceRecord.pFaceBuffer, buffer, length);
-//    faceRecord.pFaceBuffer = (BYTE*)buffer;
+//    memcpy(faceRecord.pFaceBuffer, buffer, length);
+    faceRecord.pFaceBuffer = (BYTE*)buffer;
     faceRecord.dwSize = sizeof(NET_DVR_FACE_RECORD);
 
     NET_DVR_FACE_STATUS result = {0};

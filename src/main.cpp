@@ -20,6 +20,20 @@ int main(int argc, char* argv[]) {
     spdlog::set_level(spdlog::level::debug);
     spdlog::info("access controller coming...");
 
+    //
+    auto wsclient = wsConn::getInstance(AS_BACKEND_WS_CLIENT, true);
+    auto backendAddr = getBackendWSServer();
+    spdlog::debug("connecting to backend {}", backendAddr);
+    wsclient->connect(backendAddr);
+
+    //
+    auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT, true);
+    machineClient->connect(getMachineWSServer());
+
+    //
+    auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
+    wssconn->bindAndServe("8085", server);
+
     auto acSrc = std::string(getAccessAddr());
     auto acUsername = std::string(getAccessUsername());
     auto acPassword = std::string(getAccessPassword());
@@ -28,23 +42,28 @@ int main(int argc, char* argv[]) {
     spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
     if(hik_ac.isLogin()) {
         hik_ac.setAlarm(MessageCallback);
+
+//        auto newcard = std::make_shared<card>();
+//        newcard->setCardNo("1593768284");
+//        newcard->setCardType(1);
+//        newcard->setName("新用户233");
+//        newcard->setEmployeeId(std::stol("1593768284"));
+//        time_t timep;
+//        time(&timep); /*获得time_t结构的时间，UTC时间*/
+//        auto p = gmtime(&timep);
+//        auto newe = *p;
+//        newe.tm_year+=100;
+//        newcard->setBeginTime(*p);
+//        newcard->setEndTime(newe);
+//        if (!hik_ac.doSetCard(*newcard)) {
+//            spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError);
+//            return 0;
+//        }
+//        hik_ac.doSetFace("1001", "/home/srt/froggggg.jpeg");
     } else {
         spdlog::error("hik ac connect error");
     }
 
-    //
-    auto wsclient = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
-    auto backendAddr = getBackendWSServer();
-    spdlog::debug("connecting to backend {}", backendAddr);
-    wsclient->connect(backendAddr);
-
-    //
-    auto machineClient = wsConn::getInstance(AS_MACHINE_WS_CLIENT);
-    machineClient->connect(getMachineWSServer());
-
-    //
-    auto wssconn = wsConn::getInstance(AS_SCREEN_WS_SERVER);
-    wssconn->bindAndServe("8085", server);
 
 //    auto capSrc = std::string(getCaptureAddr());
 //    auto capUsername = std::string(getCaptureUsername());
@@ -87,7 +106,7 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                 (struAlarmInfo.dwMinor == MINOR_LEGAL_CARD_PASS
                 || struAlarmInfo.dwMinor == MINOR_INVALID_CARD
                 || struAlarmInfo.dwMinor == MINOR_FACE_VERIFY_PASS)) {
-                    auto wsconn = wsConn::getInstance(AS_BACKEND_WS_CLIENT);
+                    auto wsconn = wsConn::getInstance(AS_BACKEND_WS_CLIENT, true);
                     if (!wsconn->isConnected()) {
                         auto backendAddr = getBackendWSServer();
                         wsconn->connect(backendAddr);
@@ -101,6 +120,7 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                     std::string accessorCardNo((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
 
                     auto citizen = wsConn::getCitizen();
+                    wsConn::lock();
                     if (citizen->getCardNo() != accessorCardNo && citizen->getStatus() != PERSON_EXIT) {
                         spdlog::info("occupied by {}", citizen->getName());
                         wsConn::unlock();
@@ -133,7 +153,7 @@ void server(struct mg_connection *nc, int ev, void *ev_data) {
     switch (ev) {
         case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
             /* New websocket connection. Tell everybody. */
-            auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER);
+            auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
             wss->emplace_back_connection(nc);
             spdlog::info("client {} connected", addr);
             break;
@@ -154,7 +174,7 @@ void server(struct mg_connection *nc, int ev, void *ev_data) {
             /* Disconnect. Tell everybody. */
             if (nc->flags & MG_F_IS_WEBSOCKET) {
 //                broadcast(nc, mg_mk_str("-- left"));
-                auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER);
+                auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
                 wss->erase_connection(nc);
                 spdlog::info("client {} disconnected", addr);
             }

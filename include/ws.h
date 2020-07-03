@@ -23,14 +23,21 @@ using json = nlohmann::json;
 
 class wsConn {
 public:
-    static wsConn* getInstance(const std::string &name) {
+    static wsConn *getInstance(const std::string &name, bool reconnect) {
         static std::map<std::string, wsConn*> instanceList;
         auto search = instanceList.find(name);
         if (search != instanceList.end()) {
             auto conn = search->second;
-            if (!conn->isConnected()) {
-                spdlog::debug("ws reconnect");
+            if (!conn->isConnected()  && reconnect && conn->instanceName != AS_SCREEN_WS_SERVER) {
+                spdlog::debug("ws reconnect {}", conn->instanceName);
+                if (conn->mgr) {
+                    mg_mgr_free(conn->mgr);
+                    conn->mgr = nullptr;
+                }
                 conn->connect(conn->url);
+                while(conn->connected != 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
             }
             return conn;
         } else {
@@ -65,6 +72,10 @@ public:
 
 private:
     std::string instanceName;
+public:
+    const std::string &getInstanceName() const;
+
+private:
     std::string url;
     wsConn(){};
     wsConn(const std::string &name){this->instanceName = name;};
@@ -81,9 +92,10 @@ private:
         int point{0};
         int timestamp{0};
         PERSON_STATUS status{PERSON_EXIT};
+        MACHINE_STATUS machineStatus{MACHINE_NORMAL};
 
     public:
-        std::mutex mtx;
+//        std::mutex mtx;
 
         const std::string &getName() const;
         void setName(const std::string &name);
@@ -96,6 +108,8 @@ private:
         void setTimestampNow();
         PERSON_STATUS getStatus() const;
         void setStatus(PERSON_STATUS status);
+        MACHINE_STATUS getMachineStatus() const;
+        void setMachineStatus(MACHINE_STATUS machineStatus);
 
         void checkLock() ;
 
@@ -117,8 +131,11 @@ public:
         static Citizen citizen;
         return &citizen;
     }
+    static void lock() {
+        mtx.lock();
+    }
     static void unlock() {
-       // mtx.unlock();
+        mtx.unlock();
     }
 
 };
