@@ -24,48 +24,64 @@ static std::string envDeviceNo = "ENV_DEVICE_NUMBER";
 // 工控机ws服务端地址
 static std::string envMachineWSServer = "ENV_MACHINE_WS_SERVER";
 
+static const char* getEnvSafe(const std::string &envName) {
+    if (auto p = std::getenv(envName.c_str())) {
+        return p;
+    } else {
+        spdlog::error("no ENV {}", envName);
+        return "";
+    }
+}
+
 static const char* getAccessAddr()  {
-    return std::getenv(envAccessAddr.c_str());
+    return getEnvSafe(envAccessAddr);
 }
 
 static const char* getAccessUsername() {
-    return std::getenv(envAccessUsername.c_str());
+    return getEnvSafe(envAccessUsername);
 }
 
 static const char* getAccessPassword() {
-    return std::getenv(envAccessPassword.c_str());
+    return getEnvSafe(envAccessPassword);
 }
 
 static const char* getCaptureAddr()  {
-    return std::getenv(envCaptureAddr.c_str());
+    return getEnvSafe(envCaptureAddr);
 }
 
 static const char* getCaptureUsername() {
-    return std::getenv(envCaptureUsername.c_str());
+    return getEnvSafe(envCaptureUsername);
 }
 
 static const char* getCapturePassword() {
-    return std::getenv(envCapturePassword.c_str());
+    return getEnvSafe(envCapturePassword);
 }
 
 static const char* getDeviceNo() {
-    return std::getenv(envDeviceNo.c_str());
+    return getEnvSafe(envDeviceNo);
 }
 
 static const std::string getBackendWSServer() {
-    auto backendAddr = std::string(std::getenv(envBackendWSServer.c_str()));
-    if (*(backendAddr.rbegin()) != '/') {
-        backendAddr.push_back('/');
+    if(const char* env_p = std::getenv(envBackendWSServer.c_str())) {
+        std::string backendAddr(env_p);
+        if (*(backendAddr.rbegin()) != '/') {
+            backendAddr.push_back('/');
+        }
+        auto deviceNo = getDeviceNo();
+        backendAddr.append(deviceNo);
+        return backendAddr;
+    } else {
+        spdlog::error("no ENV {}", envBackendWSServer);
+        return "";
     }
-    auto deviceNo = getDeviceNo();
-    backendAddr.append(deviceNo);
-    return backendAddr;
+
+
 }
 
 
 
 static const char* getMachineWSServer() {
-    return std::getenv(envMachineWSServer.c_str());
+    return getEnvSafe(envMachineWSServer);
 }
 
 

@@ -21,7 +21,8 @@ int main(int argc, char* argv[]) {
     spdlog::info("access controller coming...");
 
     //
-    auto wsclient = wsConn::getInstance(AS_BACKEND_WS_CLIENT, true);
+    std::string AS_CLIENT = AS_BACKEND_WS_CLIENT;
+    auto wsclient = wsConn::getInstance(AS_CLIENT, true);
     auto backendAddr = getBackendWSServer();
     spdlog::debug("connecting to backend {}", backendAddr);
     wsclient->connect(backendAddr);
