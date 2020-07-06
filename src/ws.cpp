@@ -136,8 +136,9 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     auto picture = dataDOM["pictureInfo"];
                     auto userName = dataDOM["userName"];
                     auto cardNo = dataDOM["identityNo"];
-                    if (picture == nullptr || userName == nullptr || cardNo == nullptr) {
-                        spdlog::error("loss of field");
+                    if (picture == nullptr || userName == nullptr || cardNo == nullptr ||
+                        !picture.is_string() || !userName.is_string() || !cardNo.is_string()) {
+                        spdlog::error("loss of field or wrong type");
                         break;
                     }
 
@@ -146,24 +147,46 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     auto acPassword = std::string(getAccessPassword());
                     connection hik_c(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
 
+                    auto cards = hik_c.doGetCards();
+                    std::map<long, bool> employeeSet;
+
+                    auto cardNoExist = false;
+                    for (auto &card : cards) {
+                        employeeSet.insert(std::make_pair(card.getEmployeeId(), true));
+
+                        auto itCardNo = std::stol(card.getCardNo());
+                        auto setCardNo = std::stol(cardNo.get<std::string>());
+                        if (itCardNo == setCardNo) {
+                            cardNoExist = true;
+                        }
+                    }
+
+                    long nextEmployeeId = 0;
+                    for (long i = 0;; i++) {
+                        if (employeeSet.find(i) != employeeSet.end()) {
+                            spdlog::debug("next employee id found: {}", nextEmployeeId);
+                            nextEmployeeId = i;
+                            break;
+                        }
+                    }
+
                     spdlog::debug("hik sdk {} connected", hik_c.isLogin() ? "is" : "NOT");
                     if(!hik_c.isLogin()) {
                         spdlog::error("access connect failed");
                         break;
                     }
-                    auto thecard = hik_c.doGetCard(cardNo.get<std::string>());
-                    if (thecard == nullptr) {
+                    if (!cardNoExist) {
                         // 不存在, 先下发此cardNo
                         auto newcard = std::make_shared<card>();
                         newcard->setCardNo(cardNo.get<std::string>());
                         newcard->setCardType(1);
                         newcard->setName(userName.get<std::string>());
-                        newcard->setEmployeeId(std::stol(cardNo.get<std::string>()));
+                        newcard->setEmployeeId(nextEmployeeId);
                         time_t timep;
                         time(&timep); /*获得time_t结构的时间，UTC时间*/
                         auto p = gmtime(&timep);
                         auto newe = *p;
-                        newe.tm_year+=100;
+                        newe.tm_year+=10;
                         newcard->setBeginTime(*p);
                         newcard->setEndTime(newe);
                         if (!hik_c.doSetCard(*newcard)) {
@@ -176,7 +199,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     auto base64 = picture.get<std::string>();
                     char face[1024 * 1024] = {0};
                     auto picLength = mg_base64_decode((const unsigned char*)base64.c_str(), base64.length(), face);
-                    hik_c.doSetFace(thecard->getCardNo(), face, picLength);
+                    hik_c.doSetFace(cardNo.get<std::string>(), face, picLength);
                 } else if (topicString == "ic") {
                     // do nothing now
                 } else if (topicString == "userIdentity") {

@@ -270,18 +270,23 @@ bool connection::doSetCard(const card &newcard) {
     cond.dwCardNum = 1;
     cond.dwSize = sizeof(cond);
 
-    LONG ret = NET_DVR_StartRemoteConfig(this->lUserID, NET_DVR_SET_CARD, &cond,
+    LONG remoteConfigReturn = NET_DVR_StartRemoteConfig(this->lUserID, NET_DVR_SET_CARD, &cond,
             sizeof(NET_DVR_CARD_COND), nullptr,nullptr);
-    if (ret < 0) {
+    if (remoteConfigReturn < 0) {
         spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
         return false;
     }
 
     NET_DVR_CARD_RECORD cardRecord = {0};
 
-    memcpy(cardRecord.byCardNo, newcard.getCardNo().c_str(), ACS_CARD_NO_LEN);
-    memcpy(cardRecord.byCardPassword, newcard.getPassword().c_str(), CARD_PASSWORD_LEN);
-    memcpy(cardRecord.byName, newcard.getName().c_str(), 32);
+    if (newcard.getCardNo().size() > ACS_CARD_NO_LEN || newcard.getPassword().size() > CARD_PASSWORD_LEN || newcard.getName().size() > 32) {
+        spdlog::error("wrong format card");
+        return false;
+    }
+
+    memcpy(cardRecord.byCardNo, newcard.getCardNo().c_str(), newcard.getCardNo().size());
+    memcpy(cardRecord.byCardPassword, newcard.getPassword().c_str(), newcard.getPassword().size());
+    memcpy(cardRecord.byName, newcard.getName().c_str(), newcard.getName().size());
     cardRecord.byLeaderCard = 0;
     cardRecord.byUserType = 0;
     cardRecord.byCardType = newcard.getCardType();
@@ -292,17 +297,17 @@ bool connection::doSetCard(const card &newcard) {
     cardRecord.struValid.struBeginTime.wYear = b.tm_year + 1900;
     cardRecord.struValid.struBeginTime.byMonth = b.tm_mon + 1;
     cardRecord.struValid.struBeginTime.byDay = b.tm_mday;
-    cardRecord.struValid.struBeginTime.byHour = b.tm_hour;
-    cardRecord.struValid.struBeginTime.byMinute = b.tm_min;
-    cardRecord.struValid.struBeginTime.bySecond = b.tm_sec;
+    cardRecord.struValid.struBeginTime.byHour = 0;
+    cardRecord.struValid.struBeginTime.byMinute = 0;
+    cardRecord.struValid.struBeginTime.bySecond = 0;
     // end time
     auto e = newcard.getEndTime();
     cardRecord.struValid.struEndTime.wYear = e.tm_year + 1900;
     cardRecord.struValid.struEndTime.byMonth = e.tm_mon + 1;
     cardRecord.struValid.struEndTime.byDay = e.tm_mday;
-    cardRecord.struValid.struEndTime.byHour = e.tm_hour;
-    cardRecord.struValid.struEndTime.byMinute = e.tm_min;
-    cardRecord.struValid.struEndTime.bySecond = e.tm_sec;
+    cardRecord.struValid.struEndTime.byHour = 0;
+    cardRecord.struValid.struEndTime.byMinute = 0;
+    cardRecord.struValid.struEndTime.bySecond = 0;
     cardRecord.wCardRightPlan[0] = 1;
     cardRecord.dwEmployeeNo = newcard.getEmployeeId();
     cardRecord.dwSize = sizeof(NET_DVR_CARD_RECORD);
@@ -311,11 +316,24 @@ bool connection::doSetCard(const card &newcard) {
     out.dwSize = sizeof(NET_DVR_CARD_STATUS);
 
     DWORD outlen;
-    ret = NET_DVR_SendWithRecvRemoteConfig(ret, &cardRecord, sizeof(NET_DVR_CARD_RECORD), &out, sizeof(NET_DVR_CARD_STATUS), &outlen);
+    auto ret = NET_DVR_SendWithRecvRemoteConfig(remoteConfigReturn, &cardRecord, sizeof(NET_DVR_CARD_RECORD), &out, sizeof(NET_DVR_CARD_STATUS), &outlen);
     if (ret < 0) {
         spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
         return false;
     }
+
+    if (outlen > 0) {
+        if(out.byStatus == 0) {
+            spdlog::error("set card failed, err code: {}", out.dwErrorCode);
+            return false;
+        }
+    }
+
+    if(!NET_DVR_StopRemoteConfig(remoteConfigReturn)) {
+        spdlog::error("NET_DVR_StopRemoteConfig error: {}", NET_DVR_GetLastError());
+        return false;
+    }
+
     return true;
 }
 
