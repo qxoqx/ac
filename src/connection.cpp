@@ -466,7 +466,7 @@ std::shared_ptr<card> connection::doGetCard(const std::string &cardNo) {
     return newCard;
 }
 
-bool connection::doSetFace(const std::string &cardNo, char *buffer, int length) {
+bool connection::doSetFace(const std::string &cardNo, const char *buffer, int length) {
     spdlog::debug("face picture length: {}", length);
     NET_DVR_FACE_COND faceCond = {0};
     faceCond.dwFaceNum = 1;
@@ -495,6 +495,18 @@ bool connection::doSetFace(const std::string &cardNo, char *buffer, int length) 
         return false;
     }
     spdlog::debug("NET_DVR_SendWithRecvRemoteConfig return: {}", new_ret);
+    if (resultLen > 0) {
+        if (result.byRecvStatus == 1) {
+            spdlog::info("set face succeed");
+        } else {
+            spdlog::error("set face error, RecvStatus: {}", result.byRecvStatus);
+        }
+    }
+    //人脸读卡器状态,按字节表示,0-失败,1-成功,2-重试或人脸质量差,
+//    3-内存已满(人脸数据满),4-已存在该人脸,5-非法人脸 ID,6-算法建模失败,7-未下发卡权限,8-未定义(保留)
+//            ,9-人眼间距小距小,10-图片数据长度小于 1KB,11-图片格式不符(png/jpg/bmp),
+//            12-图片像素数量超过上限,13-图片像素数量低于下限,14-图片信息校验失败,15-图片解码失败,
+//            16-人脸检测失败,17-人脸评分失败
 
     ret = NET_DVR_StopRemoteConfig(ret);
     if (ret == 0) {

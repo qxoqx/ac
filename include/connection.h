@@ -50,7 +50,7 @@ public:
     bool doSetCard(const card &newcard);
     bool doRemoveCard(std::string cardNo);
 
-    bool doSetFace(const std::string &cardNo, char* buffer, int length);
+    bool doSetFace(const std::string &cardNo, const char* buffer, int length);
     bool doSetFace(const std::string &cardNo,const std::string &facePath);
     bool doGetFaces(const std::string &cardNo) const;
     bool doRemoveFaces(const std::string &cardNo);

@@ -5,7 +5,7 @@
 #include <util.h>
 #include <connection.h>
 #include <nlohmann/json.hpp>
-
+#include <base64.h>
 #include <message.h>
 using json = nlohmann::json;
 
@@ -152,6 +152,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
 
                     auto cardNoExist = false;
                     for (auto &card : cards) {
+                        spdlog::debug("exist employeeid: {}", card.getEmployeeId());
                         employeeSet.insert(std::make_pair(card.getEmployeeId(), true));
 
                         auto itCardNo = std::stol(card.getCardNo());
@@ -161,10 +162,10 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                         }
                     }
 
-                    long nextEmployeeId = 0;
-                    for (long i = 0;; i++) {
-                        if (employeeSet.find(i) != employeeSet.end()) {
-                            spdlog::debug("next employee id found: {}", nextEmployeeId);
+                    long nextEmployeeId = 10001;
+                    for (long i = nextEmployeeId;; i++) {
+                        if (employeeSet.find(i) == employeeSet.end()) {
+                            spdlog::debug("next employee id found: {}", i);
                             nextEmployeeId = i;
                             break;
                         }
@@ -177,6 +178,7 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     }
                     if (!cardNoExist) {
                         // 不存在, 先下发此cardNo
+                        spdlog::debug("set card {}", cardNo.get<std::string>());
                         auto newcard = std::make_shared<card>();
                         newcard->setCardNo(cardNo.get<std::string>());
                         newcard->setCardType(1);
@@ -197,9 +199,9 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                     }
                     // 再下发人脸
                     auto base64 = picture.get<std::string>();
-                    char face[1024 * 1024] = {0};
-                    auto picLength = mg_base64_decode((const unsigned char*)base64.c_str(), base64.length(), face);
-                    hik_c.doSetFace(cardNo.get<std::string>(), face, picLength);
+                    auto picBinary = base64_decode(base64);
+
+                    hik_c.doSetFace(cardNo.get<std::string>(), picBinary.c_str(), picBinary.length());
                 } else if (topicString == "ic") {
                     // do nothing now
                 } else if (topicString == "userIdentity") {
