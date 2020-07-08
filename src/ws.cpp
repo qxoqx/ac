@@ -302,6 +302,8 @@ void wsConn::backend_ev_handler(struct mg_connection *nc, int ev, void *ev_data)
                                     wsServer->sendToAll(msgStr.c_str());
                                     wsConn::unlock();
                                     return;
+                                } else {
+                                    wsConn::unlock();
                                 }
 
                             }, cardNo.get<std::string>());
