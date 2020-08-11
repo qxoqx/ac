@@ -86,7 +86,10 @@ int main(int argc, char* argv[]) {
 //    mg_base64_encode(buffer.data(), buffer.size(), base64);
 //    spdlog::debug("pic: {}", base64);
 
-    std::this_thread::sleep_for(std::chrono::hours(1));
+    while (1) {
+        std::this_thread::sleep_for(std::chrono::hours(1));
+    }
+
 
     return 0;
 }
