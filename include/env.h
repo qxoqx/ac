@@ -24,6 +24,8 @@ static std::string envDeviceNo = "ENV_DEVICE_NUMBER";
 // 工控机ws服务端地址
 static std::string envMachineWSServer = "ENV_MACHINE_WS_SERVER";
 
+static std::string envMachineHTTPServer = "ENV_MACHINE_HTTP_SERVER";
+
 static const char* getEnvSafe(const std::string &envName) {
     if (auto p = std::getenv(envName.c_str())) {
         return p;
@@ -84,5 +86,8 @@ static const char* getMachineWSServer() {
     return getEnvSafe(envMachineWSServer);
 }
 
+static const char* getMachineHTTPServer() {
+    return getEnvSafe(envMachineHTTPServer);
+}
 
 #endif //AC_ENV_H
