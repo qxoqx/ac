@@ -166,7 +166,7 @@ int main(int argc, char* argv[]) {
         res.body = "ok";
     });
 
-    svr.listen("localhost", 8081);
+    svr.listen("0.0.0.0", 8081);
 
     return 0;
 }
@@ -199,16 +199,16 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
 //                        }
 //                    }
                     std::string accessorCardNo((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
-                    httplib::Client cli(getMachineHTTPServer());
+                    auto ctl = std::string(getMachineHTTPServer());
+                    httplib::Client cli(ctl.c_str());
 
-                    auto uri = "login?cardno=" + accessorCardNo;
-                    if (auto res = cli.Post(uri.c_str())) {
-                        if (res->status == 200) {
+                    auto uri = "/login?cardno=" + accessorCardNo;
+                    auto res = cli.Get(uri.c_str());
+                    if (res && res->status == 200) {
                             spdlog::debug("login:", res->body);
-                        }
                     } else {
                         auto err = res.error();
-                        spdlog::error("login error:", err);
+                        spdlog::error("login error: {}", err);
                     }
 //                    auto citizen = wsConn::getCitizen();
 //                    wsConn::lock();
