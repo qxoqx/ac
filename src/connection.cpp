@@ -17,6 +17,7 @@
 
 bool connection::threaded = false;
 
+
 connection::connection(const char* srcIp,const char* username,const char* password) {
     this->srcIp = srcIp;
     this->userName = username;
@@ -37,33 +38,7 @@ connection::connection(const char* srcIp,const char* username,const char* passwo
 //    cfgInit = NET_DVR_SetSDKInitCfg(NET_SDK_INIT_CFG_SDK_PATH, &struComPath);
 //    spdlog::debug("init lib HCNetSDKCom {}", cfgInit ? "success" : "fail");
 
-    NET_DVR_Init();
 
-    long lUserID;
-
-    NET_DVR_USER_LOGIN_INFO struLoginInfo = {0};
-    NET_DVR_DEVICEINFO_V40 struDeviceInfoV40 = {0};
-    struLoginInfo.bUseAsynLogin = false;
-
-    struLoginInfo.wPort = 8000;
-    memcpy(struLoginInfo.sDeviceAddress, srcIp, NET_DVR_DEV_ADDRESS_MAX_LEN);
-    memcpy(struLoginInfo.sUserName, username, NAME_LEN);
-    memcpy(struLoginInfo.sPassword, password, NAME_LEN);
-
-    lUserID = NET_DVR_Login_V40(&struLoginInfo, &struDeviceInfoV40);
-
-    if (lUserID < 0) {
-        spdlog::error("Login error: {}", NET_DVR_GetLastError());
-        this->isLogined = false;
-    } else {
-        this->isLogined = true;
-        this->lUserID = lUserID;
-
-        this->serialNumber = std::string((char*) &struDeviceInfoV40.struDeviceV30.sSerialNumber);
-        this->channelStart = struDeviceInfoV40.struDeviceV30.byStartChan;
-        this->channelNums = struDeviceInfoV40.struDeviceV30.byChanNum;
-
-    }
 
 }
 
@@ -81,6 +56,37 @@ bool connection::isLogin() const {
 DWORD connection::getLastError() {
     return NET_DVR_GetLastError();
 }
+
+void connection::doConnect() {
+    NET_DVR_Init();
+
+    long lUserID;
+
+    NET_DVR_USER_LOGIN_INFO struLoginInfo = {0};
+    NET_DVR_DEVICEINFO_V40 struDeviceInfoV40 = {0};
+    struLoginInfo.bUseAsynLogin = false;
+
+    struLoginInfo.wPort = 8000;
+    memcpy(struLoginInfo.sDeviceAddress, this->srcIp.c_str(), NET_DVR_DEV_ADDRESS_MAX_LEN);
+    memcpy(struLoginInfo.sUserName, this->userName.c_str(), NAME_LEN);
+    memcpy(struLoginInfo.sPassword, this->password.c_str(), NAME_LEN);
+
+    lUserID = NET_DVR_Login_V40(&struLoginInfo, &struDeviceInfoV40);
+
+    if (lUserID < 0) {
+        spdlog::error("Login error: {}", NET_DVR_GetLastError());
+        this->isLogined = false;
+    } else {
+        this->isLogined = true;
+        this->lUserID = lUserID;
+
+        this->serialNumber = std::string((char*) &struDeviceInfoV40.struDeviceV30.sSerialNumber);
+        this->channelStart = struDeviceInfoV40.struDeviceV30.byStartChan;
+        this->channelNums = struDeviceInfoV40.struDeviceV30.byChanNum;
+
+    }
+}
+
 
 bool connection::doCapture(const char* saveDst) const {
 

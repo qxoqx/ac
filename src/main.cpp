@@ -43,8 +43,11 @@ int main(int argc, char* argv[]) {
     connection hik_ac(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
 
     spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
-    if(hik_ac.isLogin()) {
-        hik_ac.setAlarm(MessageCallback);
+
+    while(1) {
+        if(hik_ac.isLogin()) {
+            hik_ac.setAlarm(MessageCallback);
+            break;
 
 //        auto newcard = std::make_shared<card>();
 //        newcard->setCardNo("1593768284");
@@ -63,8 +66,12 @@ int main(int argc, char* argv[]) {
 //            return 0;
 //        }
 //        hik_ac.doSetFace("1001", "/home/srt/froggggg.jpeg");
-    } else {
-        spdlog::error("hik ac connect error");
+        } else {
+            spdlog::error("hik ac connect error");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            hik_ac.doConnect();
+        }
+
     }
 
     httplib::Server svr;
@@ -73,6 +80,7 @@ int main(int argc, char* argv[]) {
         auto capUsername = std::string(getCaptureUsername());
         auto capPassword = std::string(getCapturePassword());
         connection hik_cap(capSrc.c_str(), capUsername.c_str(), capPassword.c_str());
+        hik_cap.doConnect();
 
         std::vector<unsigned char> buffer(static_cast<size_t>(512 * 1024));
         auto picLength = hik_cap.doCapture(reinterpret_cast<char *>(buffer.data()), buffer.size());
@@ -100,6 +108,7 @@ int main(int argc, char* argv[]) {
         auto acUsername = std::string(getAccessUsername());
         auto acPassword = std::string(getAccessPassword());
         connection hik_c(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
+        hik_c.doConnect();
 
         auto cards = hik_c.doGetCards();
         std::map<long, bool> employeeSet;

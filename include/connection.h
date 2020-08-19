@@ -39,6 +39,7 @@ public:
 
     connection(const char* srcIp,const char* username,const char* password);
     bool isLogin() const;
+    void doConnect();
 
     static DWORD getLastError();
 
