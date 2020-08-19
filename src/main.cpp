@@ -97,20 +97,25 @@ int main(int argc, char* argv[]) {
         res.set_content(std::string(reinterpret_cast<char *>(base64buffer.data()), strlen(reinterpret_cast<char *>(base64buffer.data()))), "text/plain");
     });
 
-    svr.Put("/face", [](const httplib::Request& req, httplib::Response& res) {
+    svr.Put("/face", [&](const httplib::Request& req, httplib::Response& res) {
 
         auto dom = json::parse(req.body);
         auto picture = dom["pictureInfo"];
         auto userName = dom["userName"];
         auto cardNo = dom["identityNo"];
+//
+//        auto acSrc = std::string(getAccessAddr());
+//        auto acUsername = std::string(getAccessUsername());
+//        auto acPassword = std::string(getAccessPassword());
+//        connection hik_c(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
+//        hik_c.doConnect();
+        if (!hik_ac.isLogin()) {
+            spdlog::error("access not connected");
+            res.body = "error";
+            return;
+        }
 
-        auto acSrc = std::string(getAccessAddr());
-        auto acUsername = std::string(getAccessUsername());
-        auto acPassword = std::string(getAccessPassword());
-        connection hik_c(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
-        hik_c.doConnect();
-
-        auto cards = hik_c.doGetCards();
+        auto cards = hik_ac.doGetCards();
         std::map<long, bool> employeeSet;
 
         auto cardNoExist = false;
@@ -134,12 +139,12 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        spdlog::debug("hik sdk {} connected", hik_c.isLogin() ? "is" : "NOT");
-        if(!hik_c.isLogin()) {
-            spdlog::error("access connect failed");
-            res.body = "error";
-            return;
-        }
+        spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
+//        if(!hik_ac.isLogin()) {
+//            spdlog::error("access connect failed");
+//            res.body = "error";
+//            return;
+//        }
         if (!cardNoExist) {
             // 不存在, 先下发此cardNo
             spdlog::debug("set card {}", cardNo.get<std::string>());
@@ -155,7 +160,7 @@ int main(int argc, char* argv[]) {
             newe.tm_year+=10;
             newcard->setBeginTime(*p);
             newcard->setEndTime(newe);
-            if (!hik_c.doSetCard(*newcard)) {
+            if (!hik_ac.doSetCard(*newcard)) {
                 spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError);
                 res.body = "error";
                 return;
@@ -171,7 +176,7 @@ int main(int argc, char* argv[]) {
         }
         auto picBinary = base64_decode(base64);
 
-        hik_c.doSetFace(cardNo.get<std::string>(), picBinary.c_str(), picBinary.length());
+        hik_ac.doSetFace(cardNo.get<std::string>(), picBinary.c_str(), picBinary.length());
         res.body = "ok";
     });
 
