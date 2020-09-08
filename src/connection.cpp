@@ -181,9 +181,43 @@ std::vector<card> connection::doGetCards() const {
 }
 
 bool connection::doRemoveCard(std::string cardNo) {
+    NET_DVR_CARD_COND cond = {0};
+    cond.dwCardNum = 1;
+    cond.dwSize = sizeof(NET_DVR_CARD_COND);
 
+    LONG ret = NET_DVR_StartRemoteConfig(lUserID, NET_DVR_DEL_CARD, &cond, cond.dwSize, nullptr, nullptr);
+    if (ret < 0) {
+        spdlog::error("NET_DVR_StartRemoteConfig error: {}", NET_DVR_GetLastError());
+        return false;
+    }
+    LONG remoteRet = ret;
+    NET_DVR_CARD_SEND_DATA card = {0};
+    ret = 0;
 
-    return false;
+    while (true) {
+        if (ret == NET_SDK_GET_NEXT_STATUS_SUCCESS) {
+            spdlog::debug("card deleted");
+        } else if (ret == NET_SDK_GET_NETX_STATUS_NEED_WAIT) {
+            std::this_thread::sleep_for(std::chrono::milliseconds (100));
+        } else if (ret == NET_SDK_GET_NEXT_STATUS_FINISH) {
+            break;
+        }
+        card = NET_DVR_CARD_SEND_DATA{0};
+        card.dwSize = sizeof(NET_DVR_CARD_SEND_DATA);
+        memcpy(card.byCardNo, cardNo.c_str(), ACS_CARD_NO_LEN);
+
+        NET_DVR_CARD_STATUS status {0};
+        status.dwSize = sizeof(NET_DVR_CARD_STATUS);
+
+        DWORD outlen;
+        ret = NET_DVR_SendWithRecvRemoteConfig(remoteRet, &card, sizeof(NET_DVR_CARD_SEND_DATA), &status, sizeof(NET_DVR_CARD_STATUS), &outlen);
+        if (ret < 0) {
+            spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool connection::doGetFaces(const std::string &cardNo) const {
@@ -524,3 +558,15 @@ bool connection::doSetFace(const std::string &cardNo, const char *buffer, int le
 }
 
 
+bool connection::DoClearAll() {
+    auto cards = this->doGetCards();
+
+    for (auto &&card : cards) {
+        if (this->doRemoveFaces(card.getCardNo())) {
+            spdlog::debug("{}'s face deleted", card.getCardNo());
+        }
+        if (this->doRemoveCard(card.getCardNo())) {
+            spdlog::debug("{}'s card deleted", card.getCardNo());
+        }
+    }
+}

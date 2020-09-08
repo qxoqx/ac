@@ -60,6 +60,8 @@ public:
     bool unsetAlarm();
     bool getAlarmEvents();
 
+    bool DoClearAll();
+
     virtual ~connection();
 
 private:

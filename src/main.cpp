@@ -180,6 +180,44 @@ int main(int argc, char* argv[]) {
         res.body = "ok";
     });
 
+    svr.Delete("/face", [&](const httplib::Request& req, httplib::Response& res) {
+        if (!hik_ac.isLogin()) {
+            spdlog::error("access not connected");
+            res.body = "error";
+            return;
+        }
+
+        auto cardNo = std::string("");
+        auto cardNoItr = req.params.find("cardNo");
+        while(cardNoItr != req.params.end()) {
+            cardNo = cardNoItr->second;
+            break;
+        }
+        if (!cardNo.empty()) {
+            if(hik_ac.doRemoveFaces(cardNo)) {
+                res.body = "ok";
+            } else {
+                res.body = "error";
+            }
+        } else {
+            res.body = "error";
+        }
+   });
+
+    svr.Delete("/all", [&](const httplib::Request& req, httplib::Response& res) {
+        if (!hik_ac.isLogin()) {
+            spdlog::error("access not connected");
+            res.body = "error";
+            return;
+        }
+        if(hik_ac.DoClearAll()) {
+            res.body = "ok";
+        } else {
+            res.body = "error";
+        }
+
+    });
+
     svr.listen("0.0.0.0", 8081);
 
     return 0;
