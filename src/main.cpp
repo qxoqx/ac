@@ -218,6 +218,28 @@ int main(int argc, char* argv[]) {
 
     });
 
+    svr.Get("/card", [&](const httplib::Request& req, httplib::Response& res) {
+        if (!hik_ac.isLogin()) {
+            spdlog::error("access not connected");
+            res.body = "error";
+            return;
+        }
+        auto cardNo = std::string("");
+        auto cardNoItr = req.params.find("cardNo");
+        while(cardNoItr != req.params.end()) {
+            cardNo = cardNoItr->second;
+            break;
+        }
+        if (!cardNo.empty()) {
+            auto card = hik_ac.doGetCard(cardNo);
+            if (card) {
+                res.body = card->String();
+            }
+        } else {
+            res.body = "error";
+        }
+    });
+
     svr.listen("0.0.0.0", 8081);
 
     return 0;
