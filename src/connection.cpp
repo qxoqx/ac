@@ -216,6 +216,7 @@ bool connection::doRemoveCard(std::string cardNo) {
             return false;
         }
     }
+    NET_DVR_StopRemoteConfig(remoteRet);
 
     return true;
 }
