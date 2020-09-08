@@ -240,6 +240,18 @@ int main(int argc, char* argv[]) {
         }
     });
 
+    svr.Get("/cards", [&](const httplib::Request& req, httplib::Response& res){
+        if (!hik_ac.isLogin()) {
+            spdlog::error("access not connected");
+            res.body = "error";
+            return;
+        }
+        auto cards = hik_ac.doGetCards();
+        for (auto &&card : cards) {
+            res.body += (card.String() + "\n");
+        }
+    });
+
     svr.listen("0.0.0.0", 8081);
 
     return 0;
