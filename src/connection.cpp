@@ -535,12 +535,15 @@ bool connection::doSetFace(const std::string &cardNo, const char *buffer, int le
         spdlog::error("NET_DVR_SendWithRecvRemoteConfig error: {}", NET_DVR_GetLastError());
         return false;
     }
+    auto returnBool = true;
     spdlog::debug("NET_DVR_SendWithRecvRemoteConfig return: {}", new_ret);
     if (resultLen > 0) {
         if (result.byRecvStatus == 1) {
             spdlog::info("set face succeed");
         } else {
             spdlog::error("set face error, RecvStatus: {}", result.byRecvStatus);
+            returnBool = false;
+
         }
     }
     //人脸读卡器状态,按字节表示,0-失败,1-成功,2-重试或人脸质量差,
@@ -555,7 +558,7 @@ bool connection::doSetFace(const std::string &cardNo, const char *buffer, int le
         return false;
     }
 
-    return true;
+    return returnBool;
 }
 
 

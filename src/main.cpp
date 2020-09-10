@@ -176,8 +176,12 @@ int main(int argc, char* argv[]) {
         }
         auto picBinary = base64_decode(base64);
 
-        hik_ac.doSetFace(cardNo.get<std::string>(), picBinary.c_str(), picBinary.length());
-        res.body = "ok";
+        if (hik_ac.doSetFace(cardNo.get<std::string>(), picBinary.c_str(), picBinary.length())) {
+            res.body = "ok";
+        } else {
+            res.body = "error";
+        }
+
     });
 
     svr.Delete("/face", [&](const httplib::Request& req, httplib::Response& res) {
