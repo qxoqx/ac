@@ -10,16 +10,14 @@ using json = nlohmann::json;
 
 #include <base64.h>
 #include <util.h>
-#include "ws.h"
 #include "connection.h"
 #include "env.h"
 #include "httplib/httplib.h"
 
 void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pAlarmInfo, DWORD dwBufLen, void* pUser);
-void server(struct mg_connection *nc, int ev, void *ev_data);
 
 int main(int argc, char* argv[]) {
-    spdlog::set_level(spdlog::level::debug);
+    spdlog::set_level(spdlog::level::trace);
     spdlog::info("access controller coming...");
 
 //    //
@@ -48,24 +46,6 @@ int main(int argc, char* argv[]) {
         if(hik_ac.isLogin()) {
             hik_ac.setAlarm(MessageCallback);
             break;
-
-//        auto newcard = std::make_shared<card>();
-//        newcard->setCardNo("1593768284");
-//        newcard->setCardType(1);
-//        newcard->setName("新用户233");
-//        newcard->setEmployeeId(std::stol("1593768284"));
-//        time_t timep;
-//        time(&timep); /*获得time_t结构的时间，UTC时间*/
-//        auto p = gmtime(&timep);
-//        auto newe = *p;
-//        newe.tm_year+=100;
-//        newcard->setBeginTime(*p);
-//        newcard->setEndTime(newe);
-//        if (!hik_ac.doSetCard(*newcard)) {
-//            spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError);
-//            return 0;
-//        }
-//        hik_ac.doSetFace("1001", "/home/srt/froggggg.jpeg");
         } else {
             spdlog::error("hik ac connect error");
             std::this_thread::sleep_for(std::chrono::seconds(5));
@@ -75,27 +55,6 @@ int main(int argc, char* argv[]) {
     }
 
     httplib::Server svr;
-    svr.Get("/capture",  [](const httplib::Request& req, httplib::Response& res) {
-        auto capSrc = std::string(getCaptureAddr());
-        auto capUsername = std::string(getCaptureUsername());
-        auto capPassword = std::string(getCapturePassword());
-        connection hik_cap(capSrc.c_str(), capUsername.c_str(), capPassword.c_str());
-        hik_cap.doConnect();
-
-        std::vector<unsigned char> buffer(static_cast<size_t>(512 * 1024));
-        auto picLength = hik_cap.doCapture(reinterpret_cast<char *>(buffer.data()), buffer.size());
-        if (picLength == 0) {
-            res.body = "error";
-            res.status = 401;
-            return;
-        }
-
-        std::vector<unsigned char> base64buffer(static_cast<size_t>(1024 * 1024));
-        mg_base64_encode(buffer.data(), picLength, reinterpret_cast<char *>(base64buffer.data()));
-
-
-        res.set_content(std::string(reinterpret_cast<char *>(base64buffer.data()), strlen(reinterpret_cast<char *>(base64buffer.data()))), "text/plain");
-    });
 
     svr.Put("/face", [&](const httplib::Request& req, httplib::Response& res) {
 
@@ -321,45 +280,5 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
             break;
         default:
             break;
-    }
-}
-
-void server(struct mg_connection *nc, int ev, void *ev_data) {
-    char buf[64];
-    char addr[32];
-    mg_sock_addr_to_str(&nc->sa, addr, sizeof(addr),
-                        MG_SOCK_STRINGIFY_IP | MG_SOCK_STRINGIFY_PORT);
-
-    snprintf(buf, sizeof(buf), "%s", addr);
-    switch (ev) {
-        case MG_EV_WEBSOCKET_HANDSHAKE_DONE: {
-            /* New websocket connection. Tell everybody. */
-            auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
-            wss->emplace_back_connection(nc);
-            spdlog::info("client {} connected", addr);
-            break;
-        }
-        case MG_EV_WEBSOCKET_FRAME: {
-            struct websocket_message *wm = (struct websocket_message *) ev_data;
-            /* New websocket message. Tell everybody. */
-            struct mg_str d = {(char *) wm->data, wm->size};
-            spdlog::debug("receive: {}(size: {}) from {}", d.p, wm->size, addr);
-
-            break;
-        }
-//    case MG_EV_HTTP_REQUEST: {
-//      mg_serve_http(nc, (struct http_message *) ev_data, s_http_server_opts);
-//      break;
-//    }
-        case MG_EV_CLOSE: {
-            /* Disconnect. Tell everybody. */
-            if (nc->flags & MG_F_IS_WEBSOCKET) {
-//                broadcast(nc, mg_mk_str("-- left"));
-                auto wss = wsConn::getInstance(AS_SCREEN_WS_SERVER, true);
-                wss->erase_connection(nc);
-                spdlog::info("client {} disconnected", addr);
-            }
-            break;
-        }
     }
 }
