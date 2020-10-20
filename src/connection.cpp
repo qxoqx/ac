@@ -573,4 +573,5 @@ bool connection::DoClearAll() {
             spdlog::debug("{}'s card deleted", card.getCardNo());
         }
     }
+    return true;
 }

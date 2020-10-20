@@ -251,7 +251,7 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                     auto ctl = std::string(getMachineHTTPServer());
                     httplib::Client cli(ctl.c_str());
 
-                    auto uri = "/login?cardno=" + accessorCardNo;
+                    auto uri = "/login?cardno=" + accessorCardNo + "&line=" + getLineNumber();
                     auto res = cli.Get(uri.c_str());
                     if (res && res->status == 200) {
                             spdlog::debug("login:", res->body);

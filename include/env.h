@@ -5,6 +5,7 @@
 #ifndef AC_ENV_H
 #define AC_ENV_H
 
+static std::string envLineNumber = "ENV_LINE_NUMBER";
 
 // 门禁机信息
 static std::string envAccessAddr = "ENV_ACCESS_ADDR";
@@ -43,6 +44,10 @@ static const char* getDeviceNo() {
 
 static const char* getMachineHTTPServer() {
     return getEnvSafe(envMachineHTTPServer);
+}
+
+static const char* getLineNumber() {
+    return getEnvSafe(envLineNumber);
 }
 
 #endif //AC_ENV_H

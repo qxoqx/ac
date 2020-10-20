@@ -9,7 +9,6 @@
 #include <string>
 
 #include <card.h>
-#include <face.h>
 #include <HCNetSDK.h>
 
 #include <spdlog/spdlog.h>
