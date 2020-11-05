@@ -12,9 +12,6 @@ static std::string envAccessAddr = "ENV_ACCESS_ADDR";
 static std::string envAccessUsername = "ENV_ACCESS_USERNAME";
 static std::string envAccessPassword = "ENV_ACCESS_PASSWORD";
 
-// 设备号
-static std::string envDeviceNo = "ENV_DEVICE_NUMBER";
-
 static std::string envMachineHTTPServer = "ENV_MACHINE_HTTP_SERVER";
 
 static const char* getEnvSafe(const std::string &envName) {
@@ -36,10 +33,6 @@ static const char* getAccessUsername() {
 
 static const char* getAccessPassword() {
     return getEnvSafe(envAccessPassword);
-}
-
-static const char* getDeviceNo() {
-    return getEnvSafe(envDeviceNo);
 }
 
 static const char* getMachineHTTPServer() {

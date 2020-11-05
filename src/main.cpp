@@ -43,13 +43,15 @@ int main(int argc, char* argv[]) {
     spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
 
     while(1) {
-        if(hik_ac.isLogin()) {
-            hik_ac.setAlarm(MessageCallback);
+        if(hik_ac.isLogin() &&  hik_ac.setAlarm(MessageCallback)) {
+            spdlog::info("access login and set alarm ok");
             break;
         } else {
             spdlog::error("hik ac connect error");
             std::this_thread::sleep_for(std::chrono::seconds(5));
-            hik_ac.doConnect();
+            if (!hik_ac.isLogin()) {
+                hik_ac.doConnect();
+            }
         }
 
     }
