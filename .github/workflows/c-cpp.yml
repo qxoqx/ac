@@ -29,5 +29,6 @@ jobs:
           # Comma-delimited list of tags. These will be added to the registry/repository to form the image's tags
           # Automatically tags the built image with the git reference as per the readme
           tag_with_ref: true # optional
+          tags: latest
           # Path to the build context
           path: ./lib/ # optional, default is .
