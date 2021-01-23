@@ -48,6 +48,10 @@ int main(int argc, char* argv[]) {
             break;
         } else {
             spdlog::error("hik ac connect error");
+            if (NET_DVR_PASSWORD_ERROR == NET_DVR_GetLastError()) {
+                spdlog::error("password not match, please restart service....");
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::seconds(5));
             if (!hik_ac.isLogin()) {
                 hik_ac.doConnect();
