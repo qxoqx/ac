@@ -126,7 +126,7 @@ int main(int argc, char* argv[]) {
             newcard->setBeginTime(*p);
             newcard->setEndTime(newe);
             if (!hik_ac.doSetCard(*newcard)) {
-                spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError);
+                spdlog::info("do set card err: {} when set face", NET_DVR_GetLastError());
                 res.body = "error";
                 return;
             }
