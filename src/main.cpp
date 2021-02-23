@@ -232,27 +232,20 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
     //以下代码仅供参考，实际应用中不建议在该回调函数中直接处理数据保存文件
     //例如可以使用消息的方式(PostMessage)在消息响应函数里进行处理
 
-    switch(lCommand)
-    {
-        case COMM_ALARM_ACS:
-            NET_DVR_ACS_ALARM_INFO struAlarmInfo;
-            memcpy(&struAlarmInfo, pAlarmInfo, sizeof(NET_DVR_ACS_ALARM_INFO));
-            spdlog::debug("cardNo {} major {:x} minor {:x}",  struAlarmInfo.struAcsEventInfo.byCardNo, struAlarmInfo.dwMajor, struAlarmInfo.dwMinor);
-                if(struAlarmInfo.dwMajor == MAJOR_EVENT &&
-                (struAlarmInfo.dwMinor == MINOR_LEGAL_CARD_PASS
-                || struAlarmInfo.dwMinor == MINOR_INVALID_CARD
-                || struAlarmInfo.dwMinor == MINOR_FACE_VERIFY_PASS)) {
-//                    auto wsconn = wsConn::getInstance(AS_BACKEND_WS_CLIENT, true);
-//                    if (!wsconn->isConnected()) {
-//                        auto backendAddr = getBackendWSServer();
-//                        wsconn->connect(backendAddr);
-//                        if (!wsconn->isConnected()) {
-//                            // todo: 后端连不上,告知前端
-//
-//                            spdlog::error("can't connect to backend");
-//                            break;
-//                        }
-//                    }
+    if (lCommand != COMM_ALARM_ACS) {
+        return;
+    }
+
+    NET_DVR_ACS_ALARM_INFO struAlarmInfo;
+    memcpy(&struAlarmInfo, pAlarmInfo, sizeof(NET_DVR_ACS_ALARM_INFO));
+    spdlog::debug("cardNo {} major {:x} minor {:x}",  struAlarmInfo.struAcsEventInfo.byCardNo, struAlarmInfo.dwMajor, struAlarmInfo.dwMinor);
+    switch (struAlarmInfo.dwMajor) {
+        case MAJOR_EVENT: {
+            switch (struAlarmInfo.dwMinor) {
+                case MINOR_LEGAL_CARD_PASS:
+                case MINOR_INVALID_CARD:
+                case MINOR_FACE_VERIFY_PASS:{
+                    // make a login request
                     std::string accessorCardNo((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
                     auto ctl = std::string(getMachineHTTPServer());
                     httplib::Client cli(ctl.c_str());
@@ -260,30 +253,64 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
                     auto uri = "/login?cardno=" + accessorCardNo + "&line=" + getLineNumber();
                     auto res = cli.Get(uri.c_str());
                     if (res && res->status == 200) {
-                            spdlog::debug("login:", res->body);
+                        spdlog::debug("login:", res->body);
                     } else {
                         auto err = res.error();
                         spdlog::error("login error: {}", err);
                     }
-//                    auto citizen = wsConn::getCitizen();
-//                    wsConn::lock();
-//                    if (citizen->getCardNo() != accessorCardNo && citizen->getStatus() != PERSON_EXIT) {
-//                        spdlog::info("occupied by {}", citizen->getName());
-//                        wsConn::unlock();
-//                        break;
-//                    }
-//                    wsConn::unlock();
-//
-//                    json data;
-//                    data["cardNo"] = std::string((const char*)struAlarmInfo.struAcsEventInfo.byCardNo);
-//                    data["deviceNo"] = getDeviceNo();
-//                    json msg;
-//                    msg["topic"] = "userIdentity";
-//                    msg["data"] = data;
-//                    wsconn->send(msg.dump());
+                    if (struAlarmInfo.dwPicDataLen > 0) {
 
+
+                        char buff[1024];
+                        snprintf(buff, sizeof(buff), "/tmp/%ld_fail.jpg", std::time(nullptr));
+
+
+                        std::ofstream pic;
+                        pic.open(buff, std::ios::binary | std::fstream::trunc | std::fstream::in | std::fstream::out);
+                        if (!pic.is_open()) {
+                            std::cout << "failed to open" << std::endl;
+                            break;
+                        }
+                        pic << struAlarmInfo.pPicData;
+                        pic.close();
+
+                    } else {
+                        spdlog::debug("no image when verify passed");
+                    }
+                    break;
                 }
+                case MINOR_FACE_VERIFY_FAIL:{
+                    if (struAlarmInfo.dwPicDataLen > 0) {
+
+
+                        char buff[1024];
+                        snprintf(buff, sizeof(buff), "/tmp/%ld_fail.jpg", std::time(nullptr));
+
+
+                        std::ofstream pic;
+                        pic.open(buff, std::ios::binary | std::fstream::trunc | std::fstream::in | std::fstream::out);
+                        if (!pic.is_open()) {
+                            std::cout << "failed to open" << std::endl;
+                            break;
+                        }
+                        pic << struAlarmInfo.pPicData;
+                        pic.close();
+
+                    } else {
+                        spdlog::debug("no image when verify failed");
+                    }
+
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
             break;
+        case MAJOR_OPERATION: {
+
+            break;
+        }
         default:
             break;
     }
