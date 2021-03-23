@@ -39,6 +39,7 @@ int main(int argc, char* argv[]) {
     auto acUsername = std::string(getAccessUsername());
     auto acPassword = std::string(getAccessPassword());
     connection hik_ac(acSrc.c_str(), acUsername.c_str(), acPassword.c_str());
+    hik_ac.doConnect();
 
     spdlog::debug("hik sdk {} connected", hik_ac.isLogin() ? "is" : "NOT");
 
@@ -262,7 +263,7 @@ void CALLBACK MessageCallback(LONG lCommand, NET_DVR_ALARMER *pAlarmer, char *pA
 
 
                         char buff[1024];
-                        snprintf(buff, sizeof(buff), "/tmp/%ld_fail.jpg", std::time(nullptr));
+                        snprintf(buff, sizeof(buff), "/tmp/%ld.jpg", std::time(nullptr));
 
 
                         std::ofstream pic;
