@@ -222,6 +222,11 @@ int main(int argc, char* argv[]) {
         }
     });
 
+    svr.Get("/health", [&](const httplib::Request& req, httplib::Response& res){
+        res.body = hik_ac.isLogin() ? "ok" : "error" ;
+        return;
+    });
+
     svr.listen("0.0.0.0", 8081);
 
     return 0;
